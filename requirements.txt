@@ -1,0 +1,14 @@
+fastapi==0.115.*
+starlette==0.40.*
+pydantic==2.9.*
+uvicorn[standard]==0.30.*
+python-dotenv==1.*
+
+# settings
+pydantic-settings==2.4.*
+
+# HTTP 클라이언트(비동기)
+httpx==0.27.*
+
+# (있으면 그대로 두기)
+requests==2.32.*
