@@ -1,14 +1,34 @@
 # FastAPI 임포트
 from fastapi import FastAPI
+# Lifespan 관리를 위한 asynccontextmanager 임포트
+from contextlib import asynccontextmanager
 # GZip 미들웨어 임포트
 from starlette.middleware.gzip import GZipMiddleware
 # CORS 미들웨어 임포트
 from fastapi.middleware.cors import CORSMiddleware
 # 라우터 임포트
 from app.api.v1.endpoints import ollama as ollama_router, rag as rag_router
+# RAG 벡터 스토어 임포트
+from app.services.rag_store import rag_vector_store
 
-# 애플리케이션 인스턴스 생성
-app = FastAPI(title="RAG/Ollama API", version="0.1.0")
+
+# 애플리케이션 수명주기(lifespan) 이벤트 핸들러 정의
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+	# 서버 시작 시 한 번 실행할 초기화 로직
+	rag_vector_store.ensure_vector_store()
+
+	# FastAPI가 실제로 요청을 처리하도록 넘겨줌
+	yield
+
+	# 서버 종료 시 정리 작업이 필요하면 여기서 처리 (지금은 없음)
+
+# 애플리케이션 인스턴스 생성 (lifespan 등록)
+app = FastAPI(
+	title="RAG/Ollama API",
+	version="0.1.0",
+	lifespan=lifespan,
+)
 
 # GZip 미들웨어 추가
 app.add_middleware(GZipMiddleware, minimum_size=1024)

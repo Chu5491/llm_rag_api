@@ -1,141 +1,129 @@
-# FastAPI 관련 임포트
-from fastapi import APIRouter, Body, Depends, HTTPException
-from starlette import status
-from starlette.concurrency import run_in_threadpool
+# app/api/v1/endpoints/rag.py
 
-import time
+from typing import List
+
+# FastAPI 라우터
+from fastapi import APIRouter
+
+# 방금 만든 EmbeddingService 사용
+from app.services.embeddings import embedding_service
+
+# httpx 비동기 클라이언트
 import httpx
+from fastapi import APIRouter, Query, HTTPException
 
-from app.api.deps import get_app_settings
-from app.core.config import Settings
-from app.schemas.rag import (
-	RagBuildRequest,
-	RagBuildResponse,
-	RagQueryRequest,
-	RagQueryResponse,
-	RagStatusResponse,
-)
-from app.services.rag import rag_manager
-from app.utils.ollama_client import OllamaClient
+# 설정 가져오기
+from app.core.config import get_settings
 
+# RAG 스키마
+from app.services.rag_store import rag_vector_store
+from app.schemas.rag import EmbedDebugResponse, RagQARequest, RagQAResponse
+
+# /api/v1/rag 아래로 묶이는 라우터
 router = APIRouter(prefix="/rag", tags=["rag"])
 
+@router.get("/embed-debug", response_model=EmbedDebugResponse)
+async def embed_debug():
+	"""임베딩 서비스가 정상 동작하는지 확인하는 엔드포인트"""
+	# 테스트용 문장 하나
+	sample = "RAG 시스템 임베딩 디버그 입니다."
 
-@router.get("/status", response_model=RagStatusResponse)
-async def rag_status():
-	# 인덱스가 없으면 가능하면 로드
-	if not rag_manager.vector_store:
-		try:
-			await run_in_threadpool(rag_manager.ensure_vector_store)
-		except Exception:
-			pass
+	# 쿼리 임베딩 계산
+	vec = embedding_service.embed_query(sample)
+	# vec shape: (1, dim) → 길이는 두 번째 축 크기
+	vector_length = int(vec.shape[1])
 
-	status_payload = rag_manager.status()
-	return RagStatusResponse(**status_payload)
-
-
-@router.post("/build", response_model=RagBuildResponse)
-async def build_rag(body: RagBuildRequest = Body(...)):
-	start_time = time.monotonic()
-	try:
-		chunk_count = await run_in_threadpool(
-			rag_manager.ensure_vector_store,
-			body.force,
-			body.embedding_model,
-		)
-	except (FileNotFoundError, ValueError) as exc:
-		raise HTTPException(
-			status_code=status.HTTP_400_BAD_REQUEST,
-			detail=str(exc)
-		)
-	except Exception as exc:
-		raise HTTPException(
-			status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-			detail=str(exc)
-		)
-	duration = time.monotonic() - start_time
-	return RagBuildResponse(
-		success=True,
-		chunk_count=chunk_count,
-		message="벡터 색인 생성 완료",
-		duration=duration,
+	# 디바이스와 차원 정보 반환
+	return EmbedDebugResponse(
+		device=embedding_service.device,
+		dimension=embedding_service.dimension,
+		vector_length=vector_length,
 	)
 
+@router.post("/qa", response_model=RagQAResponse)
+async def rag_qa(body: RagQARequest) -> RagQAResponse:
+	"""
+	업로드된 문서들을 기반으로 RAG QA를 수행하는 엔드포인트
 
-@router.post("/query", response_model=RagQueryResponse)
-async def query_rag(
-	body: RagQueryRequest,
-	settings: Settings = Depends(get_app_settings),
-):
-	question = (body.question or "").strip()
-	if not question:
-		raise HTTPException(
-			status_code=status.HTTP_400_BAD_REQUEST,
-			detail="질문을 입력해주세요."
-		)
+	1) FAISS에서 관련 청크 top_k개 검색
+	2) 그 청크들을 context로 묶어서
+	3) Ollama LLM에 전달해 답변 생성
+	"""
+	settings = get_settings()
 
-	start_time = time.monotonic()
+	# 인덱스 준비 확인
+	if rag_vector_store.index is None:
+		raise HTTPException(status_code=503, detail="벡터 인덱스가 아직 준비되지 않았습니다.")
 
+	# 1) 벡터 검색
+	contexts = rag_vector_store.search(query=body.query, top_k=body.top_k)
+	if not contexts:
+		raise HTTPException(status_code=404, detail="관련 문서를 찾지 못했습니다.")
+
+	# 2) 컨텍스트 텍스트 구성
+	context_text_parts: List[str] = []
+	for i, item in enumerate(contexts, start=1):
+		meta = item.get("meta", {})
+		source = meta.get("source", "unknown")
+		page = meta.get("page", None)
+
+		header = f"[{i}] source={source}"
+		if page is not None:
+			header += f", page={page}"
+
+		context_text_parts.append(f"{header}\n{item['text']}\n")
+
+	context_text = "\n\n".join(context_text_parts)
+
+	system_prompt = (
+		"너는 업로드된 문서 내용을 기반으로 질문에 답하는 한국어 어시스턴트야. "
+		"반드시 제공된 컨텍스트 안에서만 답변하고, 모르는 내용은 모른다고 말해."
+	)
+
+	user_prompt = (
+		f"다음은 참고용 문서 일부야:\n\n"
+		f"{context_text}\n\n"
+		f"위 자료만 근거로 아래 질문에 한국어로 자세히 답변해 줘.\n"
+		f"질문: {body.query}"
+	)
+
+	model_name = body.model or settings.LLM_MODEL
+
+	# 3) Ollama /api/chat 호출
 	try:
-		await run_in_threadpool(rag_manager.ensure_vector_store)
-	except Exception as exc:
+		async with httpx.AsyncClient(
+			base_url=settings.OLLAMA_BASE_URL,
+			timeout=settings.OLLAMA_TIMEOUT,
+		) as client:
+			resp = await client.post(
+				"/api/chat",
+				json={
+					"model": model_name,
+					"messages": [
+						{"role": "system", "content": system_prompt},
+						{"role": "user", "content": user_prompt},
+					],
+					"stream": False,
+				},
+			)
+	except Exception as e:
+		raise HTTPException(status_code=502, detail=f"Ollama 호출 실패: {e}")
+
+	if resp.status_code != 200:
 		raise HTTPException(
-			status_code=status.HTTP_400_BAD_REQUEST,
-			detail=f"벡터 DB 준비 실패: {exc}"
+			status_code=502,
+			detail=f"Ollama 응답 오류: {resp.status_code} {resp.text}",
 		)
 
-	try:
-		docs, mode_config = await run_in_threadpool(
-			rag_manager.retrieve_documents,
-			question,
-			body.search_mode,
-		)
-	except RuntimeError as exc:
-		raise HTTPException(
-			status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-			detail=str(exc)
-		)
+	data = resp.json()
+	message = data.get("message") or {}
+	answer = message.get("content", "").strip()
 
-	if not docs:
-		raise HTTPException(
-			status_code=status.HTTP_404_NOT_FOUND,
-			detail="동일한 문서에서 내용을 가져올 수 없습니다."
-		)
+	if not answer:
+		raise HTTPException(status_code=500, detail="LLM이 빈 응답을 반환했습니다.")
 
-	context, source_previews = rag_manager.compose_context(docs)
-	if not context:
-		raise HTTPException(
-			status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-			detail="문서에서 추출할 수 있는 텍스트가 부족합니다."
-		)
-
-	prompt = rag_manager.build_prompt(context, question)
-	client = OllamaClient(settings)
-
-	try:
-		generated = await client.generate(
-			prompt=prompt,
-			model=body.model or rag_manager.default_ollama_model,
-			stream=False,
-			options={"temperature": 0.1, "top_p": 0.9, "max_new_tokens": 1024},
-		)
-	except httpx.HTTPError as exc:
-		raise HTTPException(
-			status_code=status.HTTP_502_BAD_GATEWAY,
-			detail=f"Ollama 통신 오류: {exc}"
-		)
-
-	output = generated.get("response") or generated.get("output") or generated.get("result") or ""
-	elapsed = time.monotonic() - start_time
-	model_used = body.model or rag_manager.default_ollama_model
-
-	return RagQueryResponse(
-		success=True,
-		answer=output,
-		sources=source_previews,
-		search_mode=mode_config.get("mode", "balanced"),
-		model=model_used,
-		response_time=elapsed,
-		raw_response=generated,
-		context=context,
+	# 4) 스키마에 맞춰 응답 생성
+	return RagQAResponse(
+		answer=answer,
+		contexts=contexts,
 	)

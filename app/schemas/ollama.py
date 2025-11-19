@@ -25,3 +25,28 @@ class OllamaModelItem(BaseModel):
 class OllamaModels(BaseModel):
 	# 모델 배열(tags 필드 매핑)
 	models: List[OllamaModelItem]
+
+# Ollama Generate 요청 스키마
+class OllamaGenerateRequest(BaseModel):
+	# 프롬프트 텍스트
+	prompt: str
+	
+	# 사용할 모델명 (예: "llama3") - 설정 기본값 쓰고 싶으면 옵션
+	model: Optional[str] = None
+	
+	# 스트리밍 여부 (기본 false)
+	stream: bool = False
+	
+	# Ollama options (온도, 반복 패널티 등)
+	options: Optional[Dict[str, Any]] = None
+
+# Ollama Generate 응답 스키마
+class OllamaGenerateResponse(BaseModel):
+	# 호출 성공 여부
+	success: bool = True
+	
+	# 생성된 텍스트 (에러 시 None)
+	output: Optional[str] = None
+	
+	# 원시 응답 그대로 (디버깅용)
+	raw: Optional[Dict[str, Any]] = None

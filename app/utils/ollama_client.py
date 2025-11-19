@@ -35,7 +35,8 @@ class OllamaClient:
 				"version": data.get("version"),
 				"raw": data
 			}
-
+	
+	
 	# 모델 리스트 조회
 	async def list_models(self) -> Dict[str, Any]:
 		# 비동기 클라이언트 컨텍스트 오픈
@@ -45,4 +46,25 @@ class OllamaClient:
 			# 실패 시 예외 발생
 			resp.raise_for_status()
 			# JSON 반환
+			return resp.json()
+	
+	# LLM generate 호출
+	async def generate(
+		self,
+		prompt: str,
+		model: Optional[str] = None,
+		stream: bool = False,
+		options: Optional[Dict[str, Any]] = None,
+	) -> Dict[str, Any]:
+		async with self._client() as client:
+			payload = {
+				"model": model,
+				"prompt": prompt,
+				"stream": stream,
+			}
+			if options is not None:
+				payload["options"] = options
+
+			resp = await client.post("/api/generate", json=payload)
+			resp.raise_for_status()
 			return resp.json()

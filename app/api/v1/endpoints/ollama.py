@@ -9,7 +9,7 @@ from app.core.config import Settings
 # 클라이언트 임포트
 from app.utils.ollama_client import OllamaClient
 # 스키마 임포트
-from app.schemas.ollama import OllamaStatus, OllamaModels, OllamaModelItem
+from app.schemas.ollama import OllamaStatus, OllamaModels, OllamaModelItem, OllamaGenerateRequest, OllamaGenerateResponse
 # 예외 타입 임포트
 import httpx
 
@@ -51,4 +51,37 @@ async def get_ollama_models(settings: Settings = Depends(get_app_settings)):
 		raise HTTPException(
 			status_code=status.HTTP_502_BAD_GATEWAY,
 			detail=f"Ollama upstream error: {str(e)}"
+		)
+
+# 모델 질문 전송 엔드포인트
+@router.post("/generate", response_model=OllamaGenerateResponse)
+async def generate_with_ollama(
+	body: OllamaGenerateRequest,
+	settings: Settings = Depends(get_app_settings),
+):
+	# 클라이언트 생성
+	client = OllamaClient(settings)
+	
+	try:
+		# generate 호출
+		data = await client.generate(
+			prompt=body.prompt,
+			model=body.model,
+			stream=body.stream,
+			options=body.options,
+		)
+		output = data.get("response") or data.get("output")
+		return OllamaGenerateResponse(
+			success=True,
+			output=output,
+			raw=data,
+		)
+	
+	# 통신 예외 처리
+	except httpx.HTTPError as e:
+		# 실패 응답 구성
+		return OllamaGenerateResponse(
+			success=False,
+			output=None,
+			raw={"error": str(e)},
 		)
