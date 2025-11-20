@@ -12,8 +12,6 @@ class EmbedDebugResponse(BaseModel):
 
 class RagQARequest(BaseModel):
 	"""RAG QA 요청 바디"""
-	query: str
-	top_k: int = 4
 	model: str | None = None  # 없으면 설정값 사용
 
 

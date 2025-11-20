@@ -48,10 +48,10 @@ class OllamaClient:
 			# JSON 반환
 			return resp.json()
 	
-	# LLM generate 호출
-	async def generate(
+	# LLM chat 호출
+	async def chat(
 		self,
-		prompt: str,
+		message: str,
 		model: Optional[str] = None,
 		stream: bool = False,
 		options: Optional[Dict[str, Any]] = None,
@@ -59,12 +59,12 @@ class OllamaClient:
 		async with self._client() as client:
 			payload = {
 				"model": model,
-				"prompt": prompt,
+				"message": message,
 				"stream": stream,
 			}
 			if options is not None:
 				payload["options"] = options
 
-			resp = await client.post("/api/generate", json=payload)
+			resp = await client.post("/api/chat", json=payload)
 			resp.raise_for_status()
 			return resp.json()

@@ -20,7 +20,6 @@ from app.core.config import get_settings
 # Ollama 임베딩 서비스
 from app.services.embeddings import embedding_service
 
-
 class RagVectorStore:
 	"""uploads 폴더 문서를 임베딩해서
 	FAISS 인덱스로 관리하고 검색까지 담당하는 클래스"""

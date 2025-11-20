@@ -40,27 +40,42 @@ async def embed_debug():
 		vector_length=vector_length,
 	)
 
-@router.post("/qa", response_model=RagQAResponse)
-async def rag_qa(body: RagQARequest) -> RagQAResponse:
+@router.post("/generate", response_model=RagQAResponse)
+async def rag_generate(body: RagQARequest) -> RagQAResponse:
 	"""
-	업로드된 문서들을 기반으로 RAG QA를 수행하는 엔드포인트
+	업로드된 PDF/문서를 기반으로
+	QA 테스트케이스 JSON을 생성하는 일회성 RAG 엔드포인트.
 
-	1) FAISS에서 관련 청크 top_k개 검색
-	2) 그 청크들을 context로 묶어서
-	3) Ollama LLM에 전달해 답변 생성
+	- 쿼리 텍스트는 .env(RAG_DEFAULT_QUERY)에서 가져온다.
+	- top_k가 0 이하이면: 전체 청크 사용.
+	- LLM 호출은 Ollama /api/generate 사용.
 	"""
 	settings = get_settings()
 
-	# 인덱스 준비 확인
+	# 0) 인덱스 준비 확인
 	if rag_vector_store.index is None:
 		raise HTTPException(status_code=503, detail="벡터 인덱스가 아직 준비되지 않았습니다.")
 
-	# 1) 벡터 검색
-	contexts = rag_vector_store.search(query=body.query, top_k=body.top_k)
+	# 1) 검색용 쿼리는 .env에서 가져오기 (요청 바디의 query는 무시)
+	search_query = settings.RAG_DEFAULT_QUERY
+
+	# top_k 설정:
+	search_top_k = settings.RAG_TOP_K
+	total_chunks = len(rag_vector_store.texts)
+	if total_chunks == 0:
+		raise HTTPException(status_code=404, detail="인덱스에 저장된 문서 청크가 없습니다.")
+
+	if search_top_k and search_top_k > 0:
+		top_k = min(search_top_k, total_chunks)
+	else:
+		top_k = total_chunks  # 전체 사용
+
+	# 2) RAG 벡터 검색
+	contexts = rag_vector_store.search(query=search_query, top_k=top_k)
 	if not contexts:
 		raise HTTPException(status_code=404, detail="관련 문서를 찾지 못했습니다.")
 
-	# 2) 컨텍스트 텍스트 구성
+	# 3) CONTEXT 텍스트 구성
 	context_text_parts: List[str] = []
 	for i, item in enumerate(contexts, start=1):
 		meta = item.get("meta", {})
@@ -75,34 +90,48 @@ async def rag_qa(body: RagQARequest) -> RagQAResponse:
 
 	context_text = "\n\n".join(context_text_parts)
 
-	system_prompt = (
-		"너는 업로드된 문서 내용을 기반으로 질문에 답하는 한국어 어시스턴트야. "
-		"반드시 제공된 컨텍스트 안에서만 답변하고, 모르는 내용은 모른다고 말해."
+	# 4) 테스트케이스 규칙 프롬프트 구성
+	n = settings.RAG_TC_COUNT
+	id_prefix = settings.RAG_TC_ID_PREFIX
+	testcase_ids = [f"{id_prefix}-{i+1:03d}" for i in range(n)]
+	ids_str = ", ".join(f"\"{tc_id}\"" for tc_id in testcase_ids)
+
+	rules = (
+		f"당신은 QA 테스트케이스 전문가입니다.\n"
+		f"규칙을 어기지 말고 JSON 배열 하나만 출력하세요.\n"
+		f"- 객체 수: {n}\n"
+		f"- testcase_id: [{ids_str}] 만 사용(누락/중복 금지)\n"
+		f"- 필드: testcase_id, title, preconditions, steps, expected_result, priority\n"
+		f"- steps: 문자열 배열(각 원소는 \"1. ...\" 형식)\n"
+		f"- 각 텍스트는 80자 이내, 줄바꿈 금지\n"
+		f"- priority: High|Medium|Low\n"
+		f"- 공백 제외 '['로 시작, ']'로 끝나야 함\n"
+		f"중요: 아래 CONTEXT만 근거로 작성(추측 금지). 출력은 한국어 JSON만.\n\n"
 	)
 
-	user_prompt = (
-		f"다음은 참고용 문서 일부야:\n\n"
-		f"{context_text}\n\n"
-		f"위 자료만 근거로 아래 질문에 한국어로 자세히 답변해 줘.\n"
-		f"질문: {body.query}"
+	full_prompt = (
+		f"{rules}"
+		f"### CONTEXT\n"
+		f"{context_text}\n"
+		f"### END CONTEXT\n"
 	)
-
+	print("===== FULL PROMPT BEGIN =====")
+	print(full_prompt)
+	print("===== FULL PROMPT END =====")
+	
+	# 5) Ollama /api/generate 호출
 	model_name = body.model or settings.LLM_MODEL
 
-	# 3) Ollama /api/chat 호출
 	try:
 		async with httpx.AsyncClient(
 			base_url=settings.OLLAMA_BASE_URL,
 			timeout=settings.OLLAMA_TIMEOUT,
 		) as client:
 			resp = await client.post(
-				"/api/chat",
+				"/api/generate",
 				json={
 					"model": model_name,
-					"messages": [
-						{"role": "system", "content": system_prompt},
-						{"role": "user", "content": user_prompt},
-					],
+					"prompt": full_prompt,
 					"stream": False,
 				},
 			)
@@ -116,14 +145,14 @@ async def rag_qa(body: RagQARequest) -> RagQAResponse:
 		)
 
 	data = resp.json()
-	message = data.get("message") or {}
-	answer = message.get("content", "").strip()
+	# /api/generate 응답 형식: { "response": "......", "done": true, ... }
+	content = (data.get("response") or "").strip()
 
-	if not answer:
+	if not content:
 		raise HTTPException(status_code=500, detail="LLM이 빈 응답을 반환했습니다.")
 
-	# 4) 스키마에 맞춰 응답 생성
+	# RagQAResponse.answer 에는 "JSON 배열" 문자열이 그대로 들어감
 	return RagQAResponse(
-		answer=answer,
-		contexts=contexts,
+		answer=content,
+		contexts=contexts,  # <- 오타 조심! 실제 코드에선 contexts
 	)

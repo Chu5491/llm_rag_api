@@ -1,7 +1,7 @@
 # Pydantic BaseModel 임포트
 from pydantic import BaseModel
 # 타입 힌트용
-from typing import Any, List, Optional, Dict
+from typing import Any, List, Literal, Optional, Dict
 
 # Ollama 상태 응답 스키마
 class OllamaStatus(BaseModel):
@@ -26,10 +26,15 @@ class OllamaModels(BaseModel):
 	# 모델 배열(tags 필드 매핑)
 	models: List[OllamaModelItem]
 
-# Ollama Generate 요청 스키마
-class OllamaGenerateRequest(BaseModel):
+# 메시지 객체
+class OllamaChatMessage(BaseModel):
+	role: Literal["user", "assistant", "system"]
+	content: str
+	
+# Ollama chat 요청 스키마
+class OllamaChatRequest(BaseModel):
 	# 프롬프트 텍스트
-	prompt: str
+	messages: List[OllamaChatMessage]
 	
 	# 사용할 모델명 (예: "llama3") - 설정 기본값 쓰고 싶으면 옵션
 	model: Optional[str] = None
@@ -40,8 +45,8 @@ class OllamaGenerateRequest(BaseModel):
 	# Ollama options (온도, 반복 패널티 등)
 	options: Optional[Dict[str, Any]] = None
 
-# Ollama Generate 응답 스키마
-class OllamaGenerateResponse(BaseModel):
+# Ollama chat 응답 스키마
+class OllamaChatResponse(BaseModel):
 	# 호출 성공 여부
 	success: bool = True
 	

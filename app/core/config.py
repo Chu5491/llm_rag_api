@@ -24,6 +24,18 @@ class Settings(BaseSettings):
 	# 메타데이터(JSON) 파일 경로
 	VECTOR_META_PATH: str = "data/index_meta.json"
 
+	# 테스트케이스 생성용 기본 쿼리 (RAG 검색 용도)
+	RAG_DEFAULT_QUERY: str = "이 시스템의 요구사항과 화면 정의, 예외 상황을 잘 포함하는 부분"
+
+	# 테스트케이스 개수 (rules 안의 n 용도)
+	RAG_TC_COUNT: int = 10
+
+	# rag 상위 k개 문서 사용
+	RAG_TOP_K: int = 5
+
+	# 테스트케이스 ID prefix (TC-001, TC-002 ...)
+	RAG_TC_ID_PREFIX: str = "TC"
+	
 	# 환경변수 로딩 파일 지정(.env)
 	class Config:
 		# dotenv 사용 허용
