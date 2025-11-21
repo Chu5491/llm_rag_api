@@ -33,6 +33,9 @@ class Settings(BaseSettings):
 	# rag 상위 k개 문서 사용
 	RAG_TOP_K: int = 5
 
+	# rag 배치 사이즈
+	RAG_BATCH_SIZE: int = 3
+
 	# 테스트케이스 ID prefix (TC-001, TC-002 ...)
 	RAG_TC_ID_PREFIX: str = "TC"
 	
