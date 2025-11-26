@@ -12,6 +12,8 @@ from mcp.shared.exceptions import McpError
 from app.utils.mcp_parser import _parse_tool_call
 from app.utils.ollama_client import OllamaClient
 from app.core.config import Settings
+import logging
+from app.core.logging import get_logger
 
 # ✅ 올바른 방법:
 settings = Settings()
@@ -22,6 +24,9 @@ MCP_SERVER_ARGS = [str(MCP_SERVER_PATH)]
 print(f"[MCP Client] 서버 경로: {MCP_SERVER_PATH}")
 print(f"[MCP Client] 실행 명령어: {MCP_SERVER_COMMAND}")
 print(f"[MCP Client] 파일 존재 여부: {MCP_SERVER_PATH.exists()}")
+
+
+logger = get_logger(__name__)
 
 
 class MCPClientManager:
@@ -60,14 +65,17 @@ class MCPClientManager:
                 await self._session.initialize()
                 print(f"[MCP] 서버 연결 완료: {MCP_SERVER_COMMAND} {MCP_SERVER_ARGS}")
             except Exception as e:
-                print(f"[MCP] 세션 초기화 실패: {e}")
+                logger.error(f"❌ MCP 연결 실패: {e}", exc_info=True)
                 raise
 
             return self._session
 
     async def list_tools(self):
+        logger.debug("📋 MCP 도구 목록 조회 중...")
         session = await self._ensure_session()
-        return await session.list_tools()
+        tools = await session.list_tools()
+        logger.info(f"✅ 도구 목록 획득: {len(tools.tools)}개")
+        return tools
 
     async def call_tool(self, name: str, arguments: Dict[str, Any]):
         session = await self._ensure_session()

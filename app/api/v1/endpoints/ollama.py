@@ -12,8 +12,10 @@ from app.utils.ollama_client import OllamaClient
 from app.schemas.ollama import OllamaStatus, OllamaModels, OllamaModelItem, OllamaChatRequest, OllamaChatResponse
 # 예외 타입 임포트
 import httpx
+from fastapi import APIRouter
+from app.core.logging import get_logger
 
-# v1용 라우터 생성
+logger = get_logger(__name__)
 router = APIRouter(prefix="/ollama", tags=["ollama"])
 
 # 상태 조회 엔드포인트

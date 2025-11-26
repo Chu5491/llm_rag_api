@@ -14,9 +14,12 @@ from mcp.types import (
     Tool,
     TextContent,
 )
+import logging
+from app.core.logging import get_logger
 
 # MCP 서버 인스턴스 생성
 server = Server("dummy-mcp-server")
+logger = get_logger(__name__)
 
 # 더미 데이터베이스
 USERS_DB = {
@@ -277,4 +280,10 @@ async def main():
         )
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    logger.info("🚀 MCP 서버 시작 중...")
+    try:
+        asyncio.run(main())
+    except Exception as e:
+        logger.error(f"❌ MCP 서버 실행 중 오류 발생: {e}", exc_info=True)
+    finally:
+        logger.info("🛑 MCP 서버 종료")

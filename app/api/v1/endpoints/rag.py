@@ -4,7 +4,7 @@ from typing import List
 import json, re
 
 # FastAPI 라우터
-from fastapi import APIRouter
+from fastapi import APIRouter, UploadFile
 
 # 방금 만든 EmbeddingService 사용
 from app.services.embeddings import embedding_service
@@ -20,7 +20,11 @@ from app.core.config import get_settings
 from app.services.rag_store import rag_vector_store
 from app.schemas.rag import EmbedDebugResponse, RagQARequest, RagQAResponse
 
+# 로거
+from app.core.logging import get_logger
 
+
+logger = get_logger(__name__)
 # /api/v1/rag 아래로 묶이는 라우터
 router = APIRouter(prefix="/rag", tags=["rag"])
 
@@ -155,17 +159,12 @@ async def rag_generate(body: RagQARequest) -> RagQAResponse:
                     f"출력은 한국어 JSON 객체들의 배열만 포함해야 합니다.\n\n"
                 )
 
-
                 full_prompt = (
                     f"{rules}"
                     "### CONTEXT\n"
                     f"{context_text}\n"
                     "### END CONTEXT\n"
                 )
-
-                print(f"===== BATCH {batch_idx} FULL PROMPT BEGIN =====")
-                print(full_prompt)
-                print(f"===== BATCH {batch_idx} FULL PROMPT END =====")
 
                 # 3-3) 이 배치에 대해 Ollama /api/generate 호출
                 try:
@@ -192,11 +191,6 @@ async def rag_generate(body: RagQARequest) -> RagQAResponse:
                     # 그냥 이 배치는 스킵 (혹은 에러로 처리해도 됨)
                     continue
                 
-                print("===== START RAW RESPONSE =====")
-                print(f"[batch {batch_idx}] raw LLM response:")
-                print(content)
-                print("===== END RAW RESPONSE =====")
-
                 # 3-4) 이 배치의 JSON 파싱
                 try:
                     raw_content = (data.get("response") or "").strip()
@@ -238,7 +232,6 @@ async def rag_generate(body: RagQARequest) -> RagQAResponse:
         answer=answer_str,
         contexts=contexts,
     )
-
 
 def extract_json_array(text: str) -> str:
     match = re.search(r'\[[\s\S]*\]', text)

@@ -10,18 +10,27 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1.endpoints import ollama as ollama_router, rag as rag_router, mcp as mcp_router
 # RAG 벡터 스토어 임포트
 from app.services.rag_store import rag_vector_store
+# 로깅 임포트
+from app.core.logging import setup_logging, get_logger
 
+# 👈 가장 먼저 로깅 초기화
+setup_logging()
+logger = get_logger(__name__)
+
+logger.info("=" * 60)
+logger.info("LLM RAG API 서버 시작")
+logger.info("=" * 60)
 
 # 애플리케이션 수명주기(lifespan) 이벤트 핸들러 정의
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+	# 스타트업
+	logger.info("서버 시작 중...")
 	# 서버 시작 시 한 번 실행할 초기화 로직
 	rag_vector_store.ensure_vector_store()
-
-	# FastAPI가 실제로 요청을 처리하도록 넘겨줌
 	yield
-
-	# 서버 종료 시 정리 작업이 필요하면 여기서 처리 (지금은 없음)
+	# 셧다운
+	logger.info("서버 종료 중...")
 
 # 애플리케이션 인스턴스 생성 (lifespan 등록)
 app = FastAPI(

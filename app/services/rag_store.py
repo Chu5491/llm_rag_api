@@ -19,6 +19,10 @@ import faiss
 from app.core.config import get_settings
 # Ollama 임베딩 서비스
 from app.services.embeddings import embedding_service
+import logging
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 class RagVectorStore:
 	"""uploads 폴더 문서를 임베딩해서
@@ -38,6 +42,19 @@ class RagVectorStore:
 		# 인덱스에 들어간 각 벡터와 매핑되는 텍스트 / 메타데이터
 		self.texts: List[str] = []
 		self.metadatas: List[Dict[str, Any]] = []
+
+		logger.info(f"RagVectorStore 초기화: store_path={self.settings.VECTOR_INDEX_PATH}")
+	
+	async def load_documents(self, file_path: str):
+		logger.info(f"문서 로드 시작: {file_path}")
+		try:
+			documents = []
+			# 로드 로직...
+			logger.info(f"✅ 문서 로드 완료: {len(documents)}개 청크")
+			return documents
+		except Exception as e:
+			logger.error(f"❌ 문서 로드 실패: {e}")
+			raise
 
 	def _ensure_dirs(self) -> None:
 		"""uploads, data 디렉토리가 없으면 생성"""
@@ -193,20 +210,20 @@ class RagVectorStore:
 
 		print(f"✅ 인덱스 로드 완료: {len(self.texts)} 개 청크")
 
-	def ensure_vector_store(self) -> None:
-		"""서버 시작 시 호출해서
-		기존 인덱스가 있으면 로드, 없으면 uploads에서 새로 빌드"""
-		# 이미 메모리에 인덱스가 있다면 스킵
-		if self.index is not None:
-			return
-
-		# 인덱스/메타 파일이 둘 다 있으면 로드
-		if os.path.exists(self.settings.VECTOR_INDEX_PATH) and os.path.exists(self.settings.VECTOR_META_PATH):
-			print("📦 기존 인덱스를 로드합니다...")
-			self._load_index()
+	async def ensure_vector_store(self):
+		logger.info("벡터 스토어 초기화 확인...")
+		if self.index is None:
+			logger.info(f"벡터 스토어 로드 중: {self.settings.VECTOR_INDEX_PATH}")
+			# 인덱스/메타 파일이 둘 다 있으면 로드
+			if os.path.exists(self.settings.VECTOR_INDEX_PATH) and os.path.exists(self.settings.VECTOR_META_PATH):
+				print("📦 기존 인덱스를 로드합니다...")
+				self._load_index()
+			else:
+				print("인덱스가 없으므로 uploads 디렉토리에서 새로 빌드합니다...")
+				self._build_from_uploads()
+			logger.info("벡터 스토어 로드 완료")
 		else:
-			print("🚧 인덱스가 없으므로 uploads 디렉토리에서 새로 빌드합니다...")
-			self._build_from_uploads()
+			logger.debug("✓ 벡터 스토어 이미 초기화됨")
 
 	def search(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
 		"""쿼리 문자열을 임베딩하여 FAISS에서 top_k 유사한 청크를 반환"""
