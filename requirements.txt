@@ -1,11 +1,10 @@
 fastapi==0.115.*
-starlette==0.40.*
-pydantic==2.9.*
-uvicorn[standard]==0.30.*
+pydantic==2.11.*          
+uvicorn[standard]==0.31.*
 python-dotenv==1.*
 
 # settings
-pydantic-settings==2.4.*
+pydantic-settings==2.5.2   
 
 # HTTP 클라이언트(비동기)
 httpx==0.27.*
@@ -20,7 +19,7 @@ sentence-transformers==2.2.*
 torch==2.6.*
 faiss-cpu==1.9.*
 pypdf==3.17.*
-huggingface-hub==0.25.2
 
 # MCP
-fastmcp
+fastmcp                  
+mcp>=1.22.0              

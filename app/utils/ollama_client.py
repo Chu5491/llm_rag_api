@@ -1,7 +1,7 @@
 # 비동기 HTTP 클라이언트
 import httpx
 # 타입 힌트용 프로토콜
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 # 설정 타입 임포트
 from app.core.config import Settings
 
@@ -36,7 +36,6 @@ class OllamaClient:
 				"raw": data
 			}
 	
-	
 	# 모델 리스트 조회
 	async def list_models(self) -> Dict[str, Any]:
 		# 비동기 클라이언트 컨텍스트 오픈
@@ -47,11 +46,11 @@ class OllamaClient:
 			resp.raise_for_status()
 			# JSON 반환
 			return resp.json()
-	
-	# LLM chat 호출
-	async def chat(
+
+	# LLM chat 호출 (다중 메시지 - MCP용)
+	async def chat_with_messages(
 		self,
-		message: str,
+		messages: List[Dict[str, str]],
 		model: Optional[str] = None,
 		stream: bool = False,
 		options: Optional[Dict[str, Any]] = None,
@@ -59,7 +58,7 @@ class OllamaClient:
 		async with self._client() as client:
 			payload = {
 				"model": model,
-				"message": message,
+				"messages": messages,
 				"stream": stream,
 			}
 			if options is not None:

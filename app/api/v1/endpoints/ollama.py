@@ -64,13 +64,15 @@ async def chat_with_ollama(
 	
 	try:
 		# chat 호출
-		data = await client.chat(
-			messages=body.messages,
+        # OllamaChatMessage 객체를 딕셔너리로 변환
+		messages_dict = [msg.model_dump() for msg in body.messages]
+		data = await client.chat_with_messages(
+			messages=messages_dict,
 			model=body.model,
 			stream=body.stream,
 			options=body.options,
-		)
-		output = data.get("message", {}).get("content")
+        )
+		output = data.get("messages", {}).get("content")
 		return OllamaChatResponse(
 			success=True,
 			output=output,

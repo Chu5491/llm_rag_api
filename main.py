@@ -7,7 +7,7 @@ from starlette.middleware.gzip import GZipMiddleware
 # CORS 미들웨어 임포트
 from fastapi.middleware.cors import CORSMiddleware
 # 라우터 임포트
-from app.api.v1.endpoints import ollama as ollama_router, rag as rag_router
+from app.api.v1.endpoints import ollama as ollama_router, rag as rag_router, mcp as mcp_router
 # RAG 벡터 스토어 임포트
 from app.services.rag_store import rag_vector_store
 
@@ -51,6 +51,7 @@ def health():
 # v1 라우터 등록 (prefix: /api/v1)
 app.include_router(ollama_router.router, prefix="/api/v1")
 app.include_router(rag_router.router, prefix="/api/v1")
+app.include_router(mcp_router.router, prefix="/api/v1")
 
 # (옵션) 이 파일을 직접 실행할 때만 uvicorn으로 기동
 if __name__ == "__main__":

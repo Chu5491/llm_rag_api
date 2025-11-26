@@ -1,5 +1,6 @@
 # 설정 관리를 위한 BaseSettings 임포트
 from pydantic_settings import BaseSettings
+import sys
 
 # 애플리케이션 전역 설정 클래스
 class Settings(BaseSettings):
@@ -45,6 +46,11 @@ class Settings(BaseSettings):
 		env_file = ".env"
 		# 케이스 민감도 설정
 		case_sensitive = True
+
+	# MCP 서버 설정
+	MCP_SERVER_COMMAND: str = sys.executable  # 현재 파이썬
+	
+	MCP_SERVER: str = "mcp_server.py"
 
 # 싱글톤 성격의 설정 인스턴스 함수
 def get_settings() -> Settings:
