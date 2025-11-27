@@ -1,6 +1,5 @@
 # app/services/embeddings.py
 
-import logging
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -16,13 +15,15 @@ from app.core.config import get_settings  # Settings 정의된 위치에 맞게 
 class OllamaEmbeddingService:
 	"""Ollama /api/embed 엔드포인트를 이용하는 임베딩 서비스"""
 
-	def __init__(self, base_url: str = "http://localhost:11434", model: str = "nomic-embed-text"):
-		self.base_url = base_url
-		self.model = model
-		self._dimension = None
-		logger.info(f"✨ OllamaEmbeddingService 초기화: model={model}")
+	def __init__(self):
+		settings = get_settings()
 
-		self.timeout = get_settings().OLLAMA_TIMEOUT
+		self.base_url = settings.OLLAMA_BASE_URL.rstrip("/")
+		self.timeout = settings.OLLAMA_TIMEOUT
+		self.model = settings.EMBEDDING_MODEL
+		
+		self._dimension = None
+		logger.info(f"✨ OllamaEmbeddingService 초기화: model={self.model}")
 
 	@property
 	def device(self) -> str:

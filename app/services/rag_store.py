@@ -19,7 +19,6 @@ import faiss
 from app.core.config import get_settings
 # Ollama 임베딩 서비스
 from app.services.embeddings import embedding_service
-import logging
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)

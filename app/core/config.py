@@ -39,6 +39,9 @@ class Settings(BaseSettings):
 
 	# 테스트케이스 ID prefix (TC-001, TC-002 ...)
 	RAG_TC_ID_PREFIX: str = "TC"
+
+	# MCP DB 연결 정보
+	DB_CON: str = "postgresql://tbell:tbell@13.124.182.250:5432/tbell"
 	
 	# 환경변수 로딩 파일 지정(.env)
 	class Config:

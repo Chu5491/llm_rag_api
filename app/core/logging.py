@@ -16,7 +16,7 @@ def setup_logging():
     
     # 콘솔 핸들러만 추가
     console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(logging.DEBUG)
+    console_handler.setLevel(logging.INFO)
     console_handler.setFormatter(formatter)
     root_logger.addHandler(console_handler)
     

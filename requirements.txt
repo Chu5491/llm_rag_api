@@ -22,4 +22,5 @@ pypdf==3.17.*
 
 # MCP
 fastmcp                  
-mcp>=1.22.0              
+mcp>=1.22.0    
+pg8000

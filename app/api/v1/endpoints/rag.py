@@ -1,5 +1,4 @@
 # app/api/v1/endpoints/rag.py
-
 from typing import List
 import json, re
 

@@ -17,20 +17,20 @@ from app.core.logging import setup_logging, get_logger
 setup_logging()
 logger = get_logger(__name__)
 
-logger.info("=" * 60)
-logger.info("LLM RAG API 서버 시작")
-logger.info("=" * 60)
-
 # 애플리케이션 수명주기(lifespan) 이벤트 핸들러 정의
 @asynccontextmanager
 async def lifespan(app: FastAPI):
 	# 스타트업
-	logger.info("서버 시작 중...")
+	logger.info("=" * 60)
+	logger.info("LLM RAG API 서버 시작")
+	logger.info("=" * 60)
 	# 서버 시작 시 한 번 실행할 초기화 로직
-	rag_vector_store.ensure_vector_store()
+	await rag_vector_store.ensure_vector_store()
 	yield
 	# 셧다운
-	logger.info("서버 종료 중...")
+	logger.info("=" * 60)
+	logger.info("LLM RAG API 서버 종료")
+	logger.info("=" * 60)
 
 # 애플리케이션 인스턴스 생성 (lifespan 등록)
 app = FastAPI(

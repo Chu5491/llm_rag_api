@@ -12,7 +12,6 @@ from mcp.shared.exceptions import McpError
 from app.utils.mcp_parser import _parse_tool_call
 from app.utils.ollama_client import OllamaClient
 from app.core.config import Settings
-import logging
 from app.core.logging import get_logger
 
 # ✅ 올바른 방법:
@@ -21,13 +20,7 @@ MCP_SERVER_PATH = Path(__file__).resolve().parents[2] / settings.MCP_SERVER
 MCP_SERVER_COMMAND = settings.MCP_SERVER_COMMAND
 MCP_SERVER_ARGS = [str(MCP_SERVER_PATH)]
 
-print(f"[MCP Client] 서버 경로: {MCP_SERVER_PATH}")
-print(f"[MCP Client] 실행 명령어: {MCP_SERVER_COMMAND}")
-print(f"[MCP Client] 파일 존재 여부: {MCP_SERVER_PATH.exists()}")
-
-
 logger = get_logger(__name__)
-
 
 class MCPClientManager:
     def __init__(self) -> None:
@@ -60,7 +53,6 @@ class MCPClientManager:
                 ClientSession(self._stdio, self._write)
             )
 
-            print("[MCP] 세션 초기화 시작...")
             try:
                 await self._session.initialize()
                 print(f"[MCP] 서버 연결 완료: {MCP_SERVER_COMMAND} {MCP_SERVER_ARGS}")
@@ -71,7 +63,7 @@ class MCPClientManager:
             return self._session
 
     async def list_tools(self):
-        logger.debug("📋 MCP 도구 목록 조회 중...")
+        logger.info("📋 MCP 도구 목록 조회 중...")
         session = await self._ensure_session()
         tools = await session.list_tools()
         logger.info(f"✅ 도구 목록 획득: {len(tools.tools)}개")
@@ -106,7 +98,6 @@ def _flatten_tool_result(tool_result: CallToolResult) -> Dict[str, Any]:
         "content": flat_contents,
     }
 
-
 async def _chat_with_mcp_and_ollama(
     ollama_client: OllamaClient,
     user_input: str,
@@ -133,14 +124,31 @@ async def _chat_with_mcp_and_ollama(
 
     # 2. 첫 번째 LLM 호출: 툴 필요 여부 & 인자 추론
     system_prompt = (
-        "너는 MCP 툴을 사용할 수 있는 비서야.\n"
-        "지금부터 사용할 수 있는 툴 목록과 입력 스키마를 줄게.\n"
-        "툴을 써야 한다고 판단되면, 다음과 같은 **순수 JSON만** 출력해:\n\n"
+        "너는 MCP 기능을 사용할 수 있는 비서야.\n"
+        "항상 두 가지 모드 중 하나로만 답해야 한다.\n\n"
+        "1) JSON 모드 (도구 사용)\n"
+        "- 사용 가능한 기능 목록과 스키마를 보고, 특정 기능을 호출해야 한다고 판단되면\n"
+        "  아래 형식의 '순수 JSON'만 출력해라.\n"
         "{\n"
-        '  "tool_name": "<툴 이름>",\n'
-        '  "arguments": { ... }\n'
-        "}\n\n"
-        "툴이 필요 없으면 그냥 자연어로 대답해.\n"
+        '  \"tool_name\": \"<툴 이름>\",\n'
+        '  \"arguments\": { ... }\n'
+        "}\n"
+        "- JSON 바깥에 자연어, 설명, 코드블록, 주석은 한 글자도 섞지 마.\n\n"
+        "2) 자연어 모드 (도구 미사용 또는 지원 불가)\n"
+        "- 도구가 필요 없다고 판단되거나, 사용 가능한 기능만으로는 사용자의 요청을 만족시킬 수 없으면\n"
+        "  한국어 한 문단으로만 짧게 답해라.\n"
+        "- 이때는 '툴', 'tool', '도구', 'MCP', '엔드포인트', '스키마', 'JSON',\n"
+        "  '호출 결과', '요청/응답', '시스템' 같은 단어를 절대 쓰지 마.\n"
+        "- '도구를 쓰지 않고 답변하자면', '현재 시스템에서', '직접적인 도구 활용 없이도'와 같은\n"
+        "  메타 설명도 절대 쓰지 마.\n"
+        "- 최대 2~3문장 안에서, 사용자가 궁금해하는 내용만 자연스럽게 말해라.\n"
+        "- '다음과 같습니다', '아래와 같이' 같은 말도 쓰지 말고, 바로 내용 문장으로 시작해라.\n\n"
+        "추가 규칙:\n"
+        "- 사용자의 요청을 현재 기능 목록으로는 처리할 수 없으면,\n"
+        "  짧게 '그 정보는 여기서는 알 수 없다'는 취지로 말하고,\n"
+        "  한 문장 정도로 너가 도와줄 수 있는 범위를 자연스럽게 덧붙여라.\n"
+        "- 이때도 툴 이름이나 기술적인 용어는 쓰지 말고,\n"
+        "  사람이 이해하기 쉬운 표현으로만 정리해라.\n"
     )
 
     tool_info_str = json.dumps(tools_desc, ensure_ascii=False, indent=2)
@@ -150,16 +158,15 @@ async def _chat_with_mcp_and_ollama(
         {
             "role": "user",
             "content": (
-                "사용 가능한 MCP 툴 목록과 스키마:\n"
+                "사용 가능한 기능 목록과 입력 스키마:\n"
                 f"{tool_info_str}\n\n"
                 f"사용자 질문: {user_input}\n\n"
-                "툴이 필요하면 위 규칙에 맞춰 JSON만 출력하고,\n"
-                "필요 없으면 자연어로 바로 답해줘."
+                "위 정보를 참고해서, 도구를 사용해야 한다고 판단되면 JSON 모드로,\n"
+                "도구 없이 답할 수 있거나, 지금 기능으로는 요청을 처리할 수 없다고 판단되면\n"
+                "담백하게 거짓말 하지말고 그냥 제공할 수 없는 정보라고 짧게 한글로 답해줘."
             ),
         },
     ]
-    print("[First LLM Request] LLM에게 tools 정보 전달")
-    print(first_messages)
 
     first_resp = await ollama_client.chat_with_messages(
         messages=first_messages,
@@ -167,8 +174,6 @@ async def _chat_with_mcp_and_ollama(
         stream=False,
         options=options,
     )
-    print("[First LLM Response] LLM이 tool 선택")
-    print(first_resp)
 
     assistant_msg = first_resp.get("message", {}).get("content", "")
     tool_call = _parse_tool_call(assistant_msg)
@@ -206,20 +211,41 @@ async def _chat_with_mcp_and_ollama(
 
     # 4. 툴 결과를 가지고 두 번째 LLM 호출
     second_messages = [
-        {"role": "system", "content": "너는 MCP 툴 결과를 해석해주는 비서야."},
         {
-            "role": "user",
-            "content": (
-                f"원래 사용자 질문: {user_input}\n\n"
-                f"아래는 MCP 툴 '{tool_name}' 호출 결과야:\n"
-                f"{tool_result_str}\n\n"
-                "사용자에게 이해하기 쉽게 한국어로 답변을 정리해줘."
-            ),
-        },
-    ]
-
-    print("[Second LLM Request] LLM에게 tool 결과 전달")
-    print(second_messages)
+        "role": "system",
+        "content": (
+            "너는 숨겨진 내부 값을 참고해서 한국어로 짧은 답변만 만들어주는 비서야.\n\n"
+            "규칙:\n"
+            "- 답변에서는 다음 단어/표현을 절대 쓰지 마: "
+            "'MCP', '툴', 'tool', '도구', 'API', '엔드포인트', "
+            "'호출 결과', '쿼리 결과', '내부 시스템', '시스템에서 조회한', "
+            "'데이터베이스', 'DB', '데이터', '비공개', 'JSON', '로그', '통계'.\n"
+            "- 출처나 처리 과정, 함수/쿼리 이름, 어떤 값이 어디서 왔는지 등의 설명을 하지 마.\n"
+            "- 마치 네가 원래 알고 있던 사실을 말하듯 자연스럽게, 사용자의 질문에만 답해.\n"
+            "- 기본 답변 길이는 최대 2~3문장, 한 문단(줄바꿈 없이)으로만 답해.\n"
+            "- '다음과 같습니다', '아래와 같이', '제공된 정보에 따르면' 같은 메타 표현 대신 바로 내용으로 시작해."
+        ),
+    },
+    {
+        "role": "user",
+        "content": (
+            "다음은 사용자가 실제로 했던 질문이야.\n"
+            f"{user_input}\n\n"
+            "그리고 아래에는 너만 참고하는 추가 정보가 있다.\n"
+            "이 추가 정보가 있다는 사실이나 출처를 답변에서 절대 언급하지 마.\n\n"
+            "❗ 매우 중요:\n"
+            "- 위에서 언급한 금지어들은 답변에 절대 포함하지 마.\n"
+            "- '정보', '데이터', '자료', '시스템', '통계', '결과' 등 "
+            "추가 정보를 참고했다는 느낌을 주는 표현도 최대한 쓰지 마.\n"
+            "- 사용자가 궁금해하는 내용만 2~3문장으로 간단하게, 자연스럽게 설명해.\n"
+            "- 질문을 다시 반복하지 말고, 단순한 결론/설명만 말해.\n\n"
+            "참고용 값:\n"
+            f"{tool_result_str}\n\n"
+            "위 참고용 값을 바탕으로, 사용자의 질문에 대해 한국어로만 짧게 답해줘.\n"
+            "목록/필드명을 기계적으로 나열하지 말고, 사람이 읽기 편한 문장으로 요약해줘."
+        ),
+    }
+]
 
     second_resp = await ollama_client.chat_with_messages(
         messages=second_messages,
@@ -228,10 +254,8 @@ async def _chat_with_mcp_and_ollama(
         options=options,
     )
 
-    print("[Second LLM Response] LLM이 tool 결과 해석 최종 답변")
-    print(second_resp)
-
     final_text = second_resp.get("message", {}).get("content", "")
+
 
     return {
         "mode": "tool_used",
