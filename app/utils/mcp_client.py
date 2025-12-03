@@ -22,6 +22,7 @@ MCP_SERVER_ARGS = [str(MCP_SERVER_PATH)]
 
 logger = get_logger(__name__)
 
+
 class MCPClientManager:
     def __init__(self) -> None:
         self._session: Optional[ClientSession] = None
@@ -83,10 +84,12 @@ def _flatten_tool_result(tool_result: CallToolResult) -> Dict[str, Any]:
 
     for c in tool_result.content:
         if isinstance(c, TextContent):
-            flat_contents.append({
-                "type": "text",
-                "text": c.text,
-            })
+            flat_contents.append(
+                {
+                    "type": "text",
+                    "text": c.text,
+                }
+            )
         else:
             if hasattr(c, "model_dump"):
                 flat_contents.append(c.model_dump())
@@ -97,6 +100,7 @@ def _flatten_tool_result(tool_result: CallToolResult) -> Dict[str, Any]:
         "isError": getattr(tool_result, "isError", False),
         "content": flat_contents,
     }
+
 
 async def _chat_with_mcp_and_ollama(
     ollama_client: OllamaClient,
@@ -130,8 +134,8 @@ async def _chat_with_mcp_and_ollama(
         "- 사용 가능한 기능 목록과 스키마를 보고, 특정 기능을 호출해야 한다고 판단되면\n"
         "  아래 형식의 '순수 JSON'만 출력해라.\n"
         "{\n"
-        '  \"tool_name\": \"<툴 이름>\",\n'
-        '  \"arguments\": { ... }\n'
+        '  "tool_name": "<툴 이름>",\n'
+        '  "arguments": { ... }\n'
         "}\n"
         "- JSON 바깥에 자연어, 설명, 코드블록, 주석은 한 글자도 섞지 마.\n\n"
         "2) 자연어 모드 (도구 미사용 또는 지원 불가)\n"
@@ -212,40 +216,40 @@ async def _chat_with_mcp_and_ollama(
     # 4. 툴 결과를 가지고 두 번째 LLM 호출
     second_messages = [
         {
-        "role": "system",
-        "content": (
-            "너는 숨겨진 내부 값을 참고해서 한국어로 짧은 답변만 만들어주는 비서야.\n\n"
-            "규칙:\n"
-            "- 답변에서는 다음 단어/표현을 절대 쓰지 마: "
-            "'MCP', '툴', 'tool', '도구', 'API', '엔드포인트', "
-            "'호출 결과', '쿼리 결과', '내부 시스템', '시스템에서 조회한', "
-            "'데이터베이스', 'DB', '데이터', '비공개', 'JSON', '로그', '통계'.\n"
-            "- 출처나 처리 과정, 함수/쿼리 이름, 어떤 값이 어디서 왔는지 등의 설명을 하지 마.\n"
-            "- 마치 네가 원래 알고 있던 사실을 말하듯 자연스럽게, 사용자의 질문에만 답해.\n"
-            "- 기본 답변 길이는 최대 2~3문장, 한 문단(줄바꿈 없이)으로만 답해.\n"
-            "- '다음과 같습니다', '아래와 같이', '제공된 정보에 따르면' 같은 메타 표현 대신 바로 내용으로 시작해."
-        ),
-    },
-    {
-        "role": "user",
-        "content": (
-            "다음은 사용자가 실제로 했던 질문이야.\n"
-            f"{user_input}\n\n"
-            "그리고 아래에는 너만 참고하는 추가 정보가 있다.\n"
-            "이 추가 정보가 있다는 사실이나 출처를 답변에서 절대 언급하지 마.\n\n"
-            "❗ 매우 중요:\n"
-            "- 위에서 언급한 금지어들은 답변에 절대 포함하지 마.\n"
-            "- '정보', '데이터', '자료', '시스템', '통계', '결과' 등 "
-            "추가 정보를 참고했다는 느낌을 주는 표현도 최대한 쓰지 마.\n"
-            "- 사용자가 궁금해하는 내용만 2~3문장으로 간단하게, 자연스럽게 설명해.\n"
-            "- 질문을 다시 반복하지 말고, 단순한 결론/설명만 말해.\n\n"
-            "참고용 값:\n"
-            f"{tool_result_str}\n\n"
-            "위 참고용 값을 바탕으로, 사용자의 질문에 대해 한국어로만 짧게 답해줘.\n"
-            "목록/필드명을 기계적으로 나열하지 말고, 사람이 읽기 편한 문장으로 요약해줘."
-        ),
-    }
-]
+            "role": "system",
+            "content": (
+                "너는 숨겨진 내부 값을 참고해서 한국어로 짧은 답변만 만들어주는 비서야.\n\n"
+                "규칙:\n"
+                "- 답변에서는 다음 단어/표현을 절대 쓰지 마: "
+                "'MCP', '툴', 'tool', '도구', 'API', '엔드포인트', "
+                "'호출 결과', '쿼리 결과', '내부 시스템', '시스템에서 조회한', "
+                "'데이터베이스', 'DB', '데이터', '비공개', 'JSON', '로그', '통계'.\n"
+                "- 출처나 처리 과정, 함수/쿼리 이름, 어떤 값이 어디서 왔는지 등의 설명을 하지 마.\n"
+                "- 마치 네가 원래 알고 있던 사실을 말하듯 자연스럽게, 사용자의 질문에만 답해.\n"
+                "- 기본 답변 길이는 최대 2~3문장, 한 문단(줄바꿈 없이)으로만 답해.\n"
+                "- '다음과 같습니다', '아래와 같이', '제공된 정보에 따르면' 같은 메타 표현 대신 바로 내용으로 시작해."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                "다음은 사용자가 실제로 했던 질문이야.\n"
+                f"{user_input}\n\n"
+                "그리고 아래에는 너만 참고하는 추가 정보가 있다.\n"
+                "이 추가 정보가 있다는 사실이나 출처를 답변에서 절대 언급하지 마.\n\n"
+                "❗ 매우 중요:\n"
+                "- 위에서 언급한 금지어들은 답변에 절대 포함하지 마.\n"
+                "- '정보', '데이터', '자료', '시스템', '통계', '결과' 등 "
+                "추가 정보를 참고했다는 느낌을 주는 표현도 최대한 쓰지 마.\n"
+                "- 사용자가 궁금해하는 내용만 2~3문장으로 간단하게, 자연스럽게 설명해.\n"
+                "- 질문을 다시 반복하지 말고, 단순한 결론/설명만 말해.\n\n"
+                "참고용 값:\n"
+                f"{tool_result_str}\n\n"
+                "위 참고용 값을 바탕으로, 사용자의 질문에 대해 한국어로만 짧게 답해줘.\n"
+                "목록/필드명을 기계적으로 나열하지 말고, 사람이 읽기 편한 문장으로 요약해줘."
+            ),
+        },
+    ]
 
     second_resp = await ollama_client.chat_with_messages(
         messages=second_messages,
@@ -255,7 +259,6 @@ async def _chat_with_mcp_and_ollama(
     )
 
     final_text = second_resp.get("message", {}).get("content", "")
-
 
     return {
         "mode": "tool_used",
