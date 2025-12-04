@@ -1,0 +1,64 @@
+# -------------------------
+# Python bytecode / cache
+# -------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+
+# -------------------------
+# Build / packaging
+# -------------------------
+build/
+dist/
+*.egg-info/
+*.egg
+pip-wheel-metadata/
+
+# -------------------------
+# Virtual environments
+# -------------------------
+.env/        # 가상환경 디렉토리로 쓰는 경우
+env/
+ENV/
+venv/
+.venv/
+venv.bak/
+
+# -------------------------
+# Python tools / test cache
+# -------------------------
+.pytest_cache/
+__pypackages__/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# -------------------------
+# Logs / local DB
+# -------------------------
+*.log
+*.sqlite3
+
+# -------------------------
+# Environment variable files
+# -------------------------
+.env
+.env.*
+
+# -------------------------
+# Editors / IDE
+# -------------------------
+.idea/
+.vscode/
+*.sublime-workspace
+
+# -------------------------
+# OS-specific
+# -------------------------
+.DS_Store
+
+# -------------------------
+# App-specific temp
+# -------------------------
+uploads/tmp/

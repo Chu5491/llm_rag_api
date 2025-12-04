@@ -10,7 +10,7 @@ from mcp.client.stdio import stdio_client
 from mcp.shared.exceptions import McpError
 
 from app.utils.mcp_parser import _parse_tool_call
-from app.utils.ollama_client import OllamaClient
+from app.services.ollama_client import OllamaClient
 from app.core.config import Settings
 from app.core.logging import get_logger
 

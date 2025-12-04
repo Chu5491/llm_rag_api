@@ -1,13 +1,14 @@
 from fastapi import APIRouter, Depends
 from app.api.deps import get_app_settings
-from app.core.config import Settings
-from app.utils.ollama_client import OllamaClient
-from app.utils.mcp_client import MCPClientManager,_chat_with_mcp_and_ollama
+from app.services.ollama_client import OllamaClient
+from app.services.mcp_client import MCPClientManager, _chat_with_mcp_and_ollama
 from app.schemas.ollama import OllamaChatRequest, OllamaChatResponse
 
 import httpx
 
 router = APIRouter(prefix="/mcp", tags=["mcp"])
+Settings = get_app_settings()
+
 
 @router.post("/chat", response_model=OllamaChatResponse)
 async def chat_with_mcp_ollama(
@@ -26,7 +27,7 @@ async def chat_with_mcp_ollama(
         user_input = last_msg.content
     else:
         user_input = ""
-    
+
     # OllamaChatMessage 객체를 딕셔너리로 변환
     messages_dict = [msg.model_dump() for msg in body.messages]
 
