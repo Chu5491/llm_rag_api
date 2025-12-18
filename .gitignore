@@ -17,8 +17,8 @@ pip-wheel-metadata/
 # -------------------------
 # Virtual environments
 # -------------------------
-#.env/        # 가상환경 디렉토리로 쓰는 경우
-#env/
+.env/        # 가상환경 디렉토리로 쓰는 경우
+env/
 ENV/
 venv/
 .venv/
@@ -43,8 +43,9 @@ htmlcov/
 # -------------------------
 # Environment variable files
 # -------------------------
-#.env
-#.env.*
+.env
+
+.env.*
 
 # -------------------------
 # Editors / IDE
@@ -62,3 +63,4 @@ htmlcov/
 # App-specific temp
 # -------------------------
 uploads/tmp/
+.env
