@@ -56,6 +56,9 @@ class Settings(BaseSettings):
     # MCP DB 연결 정보
     MCP_DB_CON: str = "postgresql://tbell:tbell@tbell:5432/tbell"
 
+    # Vector DB 연결 정보
+    VECTOR_DB_CON: str = "postgresql://tbell:tbell@tbell:5432/tbell"
+
     # MCP 서버 설정
     MCP_SERVER_COMMAND: str = sys.executable  # 현재 파이썬
 

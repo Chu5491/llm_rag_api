@@ -8,7 +8,7 @@ settings = get_settings()
 
 # pg8000 사용 시 'postgresql+pg8000://...' 형식이어야 함
 # MCP_DB_CON이 이미 'postgresql://...' 형식이면 교체 필요할 수 있음
-db_url = settings.MCP_DB_CON
+db_url = settings.VECTOR_DB_CON
 if db_url.startswith("postgresql://"):
     db_url = db_url.replace("postgresql://", "postgresql+pg8000://", 1)
 
