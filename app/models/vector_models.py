@@ -1,11 +1,11 @@
 # app/models/vector_models.py
 from sqlalchemy import Column, Integer, Text, JSON, DateTime, String
 from pgvector.sqlalchemy import Vector
-from app.db.database import Base
+from app.db.database import VectorBase
 from datetime import datetime
 
 
-class RagEmbedding(Base):
+class RagEmbedding(VectorBase):
     """
     모든 소스(File, Figma, Jira 등)에서 생성된 임베딩을 통합 관리하는 테이블
     """

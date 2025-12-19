@@ -6,7 +6,7 @@ from pypdf import PdfReader
 from app.core.config import get_settings
 from app.services.embeddings import embedding_service
 from app.core.logging import get_logger
-from app.db.database import SessionLocal
+from app.db.database import VectorSessionLocal
 from app.models.vector_models import RagEmbedding
 
 logger = get_logger(__name__)
@@ -28,7 +28,7 @@ class FileRagVectorStorePG:
 
     def get_count(self) -> int:
         """현재 DB에 저장된 파일 소스의 총 청크 수를 반환한다."""
-        with SessionLocal() as db:
+        with VectorSessionLocal() as db:
             return (
                 db.query(RagEmbedding)
                 .filter(RagEmbedding.source_type == self.source_type)
@@ -40,7 +40,7 @@ class FileRagVectorStorePG:
         벡터 저장소가 준비되었는지 확인한다.
         데이터가 하나도 없을 경우 uploads 디렉토리에 있는 파일들을 읽어 초기 빌드를 수행한다.
         """
-        with SessionLocal() as db:
+        with VectorSessionLocal() as db:
             # 해당 소스 타입(file)의 데이터가 있는지 확인
             count = (
                 db.query(RagEmbedding)
@@ -123,7 +123,7 @@ class FileRagVectorStorePG:
         embeddings = embedding_service.embed_texts(texts)
 
         # DB 세션을 열어 각 청크와 벡터를 저장
-        with SessionLocal() as db:
+        with VectorSessionLocal() as db:
             for entry, emb in zip(all_entries, embeddings):
                 new_emb = RagEmbedding(
                     source_type=self.source_type,
@@ -143,7 +143,7 @@ class FileRagVectorStorePG:
         # 쿼리를 벡터로 변환 (리스트 형태 [ [0.1, 0.2, ...] ])
         query_vec = embedding_service.embed_query(query)[0].tolist()
 
-        with SessionLocal() as db:
+        with VectorSessionLocal() as db:
             # 코사인 거리(cosine_distance)를 기준으로 정렬하여 가장 가까운 문서 조회
             # (<=> operator in pgvector)
             results = (

@@ -188,7 +188,6 @@ async def rag_generate(body: RagQARequest) -> RagQAResponse:
                 full_prompt = f"{rules}### CONTEXT\n{context_text}\n### END CONTEXT\n"
 
                 # 3-3) Ollama 호출
-                logger.info(f"[RAG-File-PG] Batch {batch_idx} Ollama API 호출 중...")
                 resp = await client.post(
                     "/api/generate",
                     json={
@@ -251,44 +250,72 @@ async def rag_generate_from_figma(body: RagQARequest) -> RagQAResponse:
     Figma 화면 정보를 기반으로 QA 테스트케이스 JSON을 생성하는 엔드포인트. (Postgres 버전)
     """
     settings = get_app_settings()
-    logger.info("[Figma-RAG-PG] /generate/figma 요청 수신")
+    logger.info("[RAG-Figma-PG] Figma RAG 요청 수신")
 
     if not figma_rag_vector_store_pg.enabled:
-        logger.warning("[Figma-RAG-PG] Figma 기능 비활성 상태")
+        logger.warning("[RAG-Figma-PG] Figma RAG 기능이 비활성화되어 있음")
         raise HTTPException(
             status_code=503, detail="Figma RAG 기능이 비활성화되어 있습니다."
         )
 
+    # 1) 검색용 쿼리는 .env에서 가져오기 (요청 바디의 query는 무시)
     search_query = settings.RAG_DEFAULT_QUERY
-    total_items = figma_rag_vector_store_pg.get_count()
+    search_top_k = settings.RAG_TOP_K
+    rag_batch_size = settings.RAG_BATCH_SIZE
 
+    # DB에서 현재 소스에 해당하는 총 아이템 수 확인
+    total_items = figma_rag_vector_store_pg.get_count()
     if total_items == 0:
-        logger.warning("[Figma-RAG-PG] DB에 Figma 데이터가 없음")
+        logger.warning("[RAG-Figma-PG] DB에 Figma 데이터가 없음")
         raise HTTPException(
             status_code=404, detail="DB에 저장된 Figma 데이터가 없습니다."
         )
 
-    search_top_k = settings.RAG_TOP_K
-    top_k = min(search_top_k, total_items) if search_top_k > 0 else total_items
+    # top_k: 0 이하 → 전체 사용, 아니면 상위 N개
+    if search_top_k and search_top_k > 0:
+        top_k = min(search_top_k, total_items)
+    else:
+        top_k = total_items  # 전체 사용
 
-    logger.info(f"[Figma-RAG-PG] 검색 수행 - top_k: {top_k}")
-    # 2) PG 기반 검색
+    logger.info(
+        "[RAG-Figma-PG] 전체 컨텍스트 수=%d, 설정 top_k=%s → 실제 사용 컨텍스트 수=%d",
+        total_items,
+        search_top_k,
+        top_k,
+    )
+
+    # 2) RAG 벡터 검색 (PG 전용 검색 로직 사용)
     contexts = figma_rag_vector_store_pg.search(search_query, top_k=top_k)
 
     if not contexts:
-        logger.warning("[Figma-RAG-PG] 검색 결과 없음")
+        logger.warning(f"[RAG-Figma-PG] 검색 쿼리: {search_query} 에 대한 결과 없음")
         raise HTTPException(
             status_code=404, detail="관련 Figma 화면을 찾지 못했습니다."
         )
 
-    # 배치 로직 및 LLM 호출
-    rag_batch_size = settings.RAG_BATCH_SIZE or len(contexts)
+    # batch_size 설정
+    if rag_batch_size <= 0 or rag_batch_size >= len(contexts):
+        rag_batch_size = len(contexts)
+
+    # 총 배치 수 계산
+    num_batches = (len(contexts) + rag_batch_size - 1) // rag_batch_size
+    logger.info(
+        "[RAG-Figma-PG] 배치 실행 준비 - 전체 컨텍스트=%d, 배치 크기=%d, 총 배치 수=%d",
+        len(contexts),
+        rag_batch_size,
+        num_batches,
+    )
+
+    # 3) 테스트케이스 개수 / ID prefix
+    n = settings.RAG_TC_COUNT
     id_prefix = settings.RAG_TC_ID_PREFIX
     model_name = body.model or settings.LLM_MODEL
-    n = settings.RAG_TC_COUNT
-
-    num_batches = (len(contexts) + rag_batch_size - 1) // rag_batch_size
-    logger.info(f"[Figma-RAG-PG] 배치 준비 - 총 {num_batches}개 배치")
+    logger.info(
+        "[RAG-Figma-PG] 요청 n=%d, ID prefix=%s, model=%s",
+        n,
+        id_prefix,
+        model_name,
+    )
 
     all_testcases = []
     global_index = 1
@@ -302,8 +329,13 @@ async def rag_generate_from_figma(body: RagQARequest) -> RagQAResponse:
                 range(0, len(contexts), rag_batch_size), start=1
             ):
                 batch = contexts[i : i + rag_batch_size]
+                remaining_batches = num_batches - batch_idx
                 logger.info(
-                    f"[Figma-RAG-PG] Batch {batch_idx}/{num_batches} 처리 중..."
+                    "[RAG-Figma-PG] Batch %d/%d 시작 - 현재 배치 크기=%d, 남은 배치 수=%d",
+                    batch_idx,
+                    num_batches,
+                    len(batch),
+                    remaining_batches,
                 )
 
                 context_text_parts = []
@@ -370,16 +402,23 @@ async def rag_generate_from_figma(body: RagQARequest) -> RagQAResponse:
                     json_str = extract_json_array(raw_content)
                     batch_cases = json.loads(json_str)
 
+                    # 테스트케이스에 ID 할당 및 목록에 추가
                     for tc in batch_cases:
                         tc["testcase_id"] = f"{id_prefix}_{global_index:03d}"
                         global_index += 1
                         all_testcases.append(tc)
 
+                    logger.info(
+                        f"[RAG-Figma-PG] Batch {batch_idx} 완료 - {len(batch_cases)}개 TC 생성됨"
+                    )
+
     except Exception as e:
-        logger.exception(f"[Figma-RAG-PG] 에러 발생: {e}")
+        logger.exception("[RAG-Figma-PG] 테스트케이스 생성 중 오류 발생: %s", str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
-    logger.info(f"[Figma-RAG-PG] 최종 완료 - 총 {len(all_testcases)}개 반환")
+    logger.info(
+        "[RAG-Figma-PG] 최종 완료 - 총 %d개 테스트케이스 반환", len(all_testcases)
+    )
     return RagQAResponse(
         answer=json.dumps(all_testcases, ensure_ascii=False),
         contexts=contexts,

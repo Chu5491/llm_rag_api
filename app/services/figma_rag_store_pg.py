@@ -5,7 +5,7 @@ from datetime import datetime
 from app.core.config import get_settings
 from app.services.embeddings import embedding_service
 from app.core.logging import get_logger
-from app.db.database import SessionLocal
+from app.db.database import VectorSessionLocal
 from app.models.vector_models import RagEmbedding
 from app.schemas.figma import FigmaFileLLMSummary
 from app.services.figma_client import FigmaClient
@@ -30,7 +30,7 @@ class FigmaRagVectorStorePG:
 
     def get_count(self) -> int:
         """현재 DB에 저장된 Figma 소스의 총 청크 수를 반환한다."""
-        with SessionLocal() as db:
+        with VectorSessionLocal() as db:
             return (
                 db.query(RagEmbedding)
                 .filter(RagEmbedding.source_type == self.source_type)
@@ -44,7 +44,7 @@ class FigmaRagVectorStorePG:
         if not self.enabled:
             return
 
-        with SessionLocal() as db:
+        with VectorSessionLocal() as db:
             # figma 타입의 데이터가 있는지 확인
             count = (
                 db.query(RagEmbedding)
@@ -187,7 +187,7 @@ class FigmaRagVectorStorePG:
         texts = [e["text"] for e in entries]
         embeddings = embedding_service.embed_texts(texts)
 
-        with SessionLocal() as db:
+        with VectorSessionLocal() as db:
             for entry, emb in zip(entries, embeddings):
                 db.add(
                     RagEmbedding(
@@ -209,7 +209,7 @@ class FigmaRagVectorStorePG:
 
         query_vec = embedding_service.embed_query(query)[0].tolist()
 
-        with SessionLocal() as db:
+        with VectorSessionLocal() as db:
             results = (
                 db.query(RagEmbedding)
                 .filter(RagEmbedding.source_type == self.source_type)
