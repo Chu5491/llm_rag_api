@@ -13,13 +13,26 @@ class OllamaEmbeddingService:
 
     def __init__(self):
         settings = get_settings()
-
+        self.settings = settings
         self.base_url = settings.OLLAMA_BASE_URL.rstrip("/")
         self.timeout = settings.OLLAMA_TIMEOUT
-        self.model = settings.EMBEDDING_MODEL
-
         self._dimension = None
-        logger.info(f"✨ OllamaEmbeddingService 초기화: model={self.model}")
+
+    def _get_embedding_model(self) -> str:
+        """DB에서 최신 임베딩 모델 설정을 가져옵니다."""
+        from app.db.database import VectorSessionLocal
+        from app.crud.config import get_app_config
+
+        try:
+            with VectorSessionLocal() as db:
+                config = get_app_config(db)
+                if config and config.embedding_model:
+                    return config.embedding_model
+        except Exception as e:
+            logger.error(f"DB에서 임베딩 모델 정보를 가져오는데 실패했습니다: {e}")
+
+        # 기본값 (DB 연결 실패 시 등)
+        return "nomic-embed-text"
 
     @property
     def device(self) -> str:
@@ -40,9 +53,10 @@ class OllamaEmbeddingService:
         출력: (len(inputs), dim) numpy 배열
         """
         url = f"{self.base_url}/api/embed"
+        model = self._get_embedding_model()
 
         payload = {
-            "model": self.model,
+            "model": model,
             "input": inputs,
         }
 

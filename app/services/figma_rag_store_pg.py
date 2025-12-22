@@ -2,11 +2,14 @@
 from typing import List, Dict, Any
 import asyncio
 from datetime import datetime
-from app.core.config import get_settings
 from app.services.embeddings import embedding_service
 from app.core.logging import get_logger
 from app.db.database import VectorSessionLocal
-from app.models.vector_models import RagEmbedding
+from app.crud.rag import (
+    get_rag_count_by_source,
+    create_rag_embeddings,
+    search_similar_embeddings,
+)
 from app.schemas.figma import FigmaFileLLMSummary
 from app.services.figma_client import FigmaClient
 from app.utils.figma_url_parser import parse_figma_team_project
@@ -21,21 +24,29 @@ class FigmaRagVectorStorePG:
     """
 
     def __init__(self):
-        self.settings = get_settings()
-        self.enabled = bool(self.settings.FIGMA_ENABLED)
         self.source_type = "figma"  # 소스 타입 구분용
         logger.info(
             f"FigmaRagVectorStorePG 초기화 완료 (source_type={self.source_type})"
         )
 
+    def _get_db_config(self):
+        """DB에서 최신 Figma 설정을 가져옵니다."""
+        from app.db.database import VectorSessionLocal
+        from app.crud.config import get_app_config
+
+        with VectorSessionLocal() as db:
+            return get_app_config(db)
+
+    @property
+    def enabled(self) -> bool:
+        """Figma 기능 활성화 여부를 DB에서 실시간으로 확인합니다."""
+        config = self._get_db_config()
+        return bool(config.figma_enabled) if config else False
+
     def get_count(self) -> int:
         """현재 DB에 저장된 Figma 소스의 총 청크 수를 반환한다."""
         with VectorSessionLocal() as db:
-            return (
-                db.query(RagEmbedding)
-                .filter(RagEmbedding.source_type == self.source_type)
-                .count()
-            )
+            return get_rag_count_by_source(db, self.source_type)
 
     async def ensure_vector_store(self):
         """
@@ -46,11 +57,7 @@ class FigmaRagVectorStorePG:
 
         with VectorSessionLocal() as db:
             # figma 타입의 데이터가 있는지 확인
-            count = (
-                db.query(RagEmbedding)
-                .filter(RagEmbedding.source_type == self.source_type)
-                .count()
-            )
+            count = get_rag_count_by_source(db, self.source_type)
             if count == 0:
                 logger.info(
                     f"DB에 '{self.source_type}' 데이터가 없으므로 API에서 빌드합니다."
@@ -65,11 +72,12 @@ class FigmaRagVectorStorePG:
         """
         Figma API를 통해 프로젝트 파일들을 조회하고, LLM 요약 정보를 생성하여 DB에 저장한다.
         """
-        if not self.enabled:
+        config = self._get_db_config()
+        if not config or not bool(config.figma_enabled):
             return
 
         client = FigmaClient()
-        data = parse_figma_team_project(self.settings.FIGMA_URL)
+        data = parse_figma_team_project(config.figma_url)
         project_id = data.get("project_id")
         if not project_id:
             logger.warning("Figma URL에서 project_id를 찾을 수 없습니다.")
@@ -90,7 +98,7 @@ class FigmaRagVectorStorePG:
                 return self._load_text_from_figma(
                     llm_summary,
                     source=file_meta.name,
-                    chunk_mode=self.settings.FIGMA_CHUNK_MODE,
+                    chunk_mode=config.figma_chunk_mode or "section_only",
                 )
             except Exception as e:
                 logger.error(f"Figma 파일 인덱싱 실패: {file_meta.name} - {e}")
@@ -187,17 +195,19 @@ class FigmaRagVectorStorePG:
         texts = [e["text"] for e in entries]
         embeddings = embedding_service.embed_texts(texts)
 
+        embeddings_data = []
+        for entry, emb in zip(entries, embeddings):
+            embeddings_data.append(
+                {
+                    "source_type": self.source_type,
+                    "text": entry["text"],
+                    "embedding": emb.tolist(),
+                    "metadata_json": entry["meta"],
+                }
+            )
+
         with VectorSessionLocal() as db:
-            for entry, emb in zip(entries, embeddings):
-                db.add(
-                    RagEmbedding(
-                        source_type=self.source_type,
-                        text=entry["text"],
-                        embedding=emb.tolist(),
-                        metadata_json=entry["meta"],
-                    )
-                )
-            db.commit()
+            create_rag_embeddings(db, embeddings_data)
         logger.info(f"✅ Figma 데이터를 {len(entries)}개 저장했습니다.")
 
     def search(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
@@ -210,13 +220,7 @@ class FigmaRagVectorStorePG:
         query_vec = embedding_service.embed_query(query)[0].tolist()
 
         with VectorSessionLocal() as db:
-            results = (
-                db.query(RagEmbedding)
-                .filter(RagEmbedding.source_type == self.source_type)
-                .order_by(RagEmbedding.embedding.cosine_distance(query_vec))
-                .limit(top_k)
-                .all()
-            )
+            results = search_similar_embeddings(db, query_vec, self.source_type, top_k)
             return [
                 {"score": 0.0, "text": r.text, "meta": r.metadata_json} for r in results
             ]

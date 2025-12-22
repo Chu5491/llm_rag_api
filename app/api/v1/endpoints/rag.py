@@ -3,8 +3,12 @@ from typing import List
 import json
 
 # FastAPI 라우터
-from fastapi import APIRouter
-from fastapi import HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+from sqlalchemy.orm import Session
+from app.db.database import get_vector_db
+from app.crud.config import get_app_config
+from app.crud.rag import search_all_sources
+from app.crud.history import create_history, update_progress, complete_history
 
 # 방금 만든 EmbeddingService 사용
 from app.services.embeddings import embedding_service
@@ -19,6 +23,7 @@ from app.api.deps import get_app_settings
 from app.services.file_rag_store_pg import file_rag_vector_store_pg
 from app.services.figma_rag_store_pg import figma_rag_vector_store_pg
 from app.schemas.rag import EmbedDebugResponse, RagQARequest, RagQAResponse
+from app.models.rag_embeddings import RagEmbedding
 
 # 로거
 from app.core.logging import get_logger
@@ -52,7 +57,9 @@ async def embed_debug():
 
 
 @router.post("/generate/file", response_model=RagQAResponse)
-async def rag_generate(body: RagQARequest) -> RagQAResponse:
+async def rag_generate(
+    body: RagQARequest, db: Session = Depends(get_vector_db)
+) -> RagQAResponse:
     """
     업로드된 PDF/문서를 기반으로
     QA 테스트케이스 JSON을 생성하는 일회성 RAG 엔드포인트. (Postgres 버전)
@@ -61,13 +68,24 @@ async def rag_generate(body: RagQARequest) -> RagQAResponse:
     - DB에서 통합 검색(source_type=file)을 수행한다.
     """
     settings = get_app_settings()
+    config = get_app_config(db)
+    if not config:
+        raise HTTPException(
+            status_code=404,
+            detail="DB에 시스템 설정(Configurations)이 존재하지 않습니다.",
+        )
 
     # 1) 검색용 쿼리는 .env에서 가져오기 (요청 바디의 query는 무시)
     search_query = settings.RAG_DEFAULT_QUERY
 
     # top_k / batch_size 설정
     search_top_k = settings.RAG_TOP_K
-    rag_batch_size = settings.RAG_BATCH_SIZE
+
+    # DB 설정 적용
+    rag_batch_size = config.rag_batch_size
+    n = config.rag_tc_count
+    id_prefix = config.rag_tc_id_prefix
+    llm_model = config.llm_model
 
     # DB에서 현재 소스에 해당하는 총 아이템 수 확인
     total_items = file_rag_vector_store_pg.get_count()
@@ -109,9 +127,8 @@ async def rag_generate(body: RagQARequest) -> RagQAResponse:
     )
 
     # 3) 테스트케이스 개수 / ID prefix
-    n = settings.RAG_TC_COUNT
-    id_prefix = settings.RAG_TC_ID_PREFIX
-    model_name = body.model or settings.LLM_MODEL
+    # n, id_prefix는 위에서 DB 설정으로 이미 가져옴
+    model_name = body.model or llm_model
     logger.info(
         "[RAG-File-PG] 요청 n=%d, ID prefix=%s, model=%s",
         n,
@@ -245,11 +262,20 @@ async def rag_generate(body: RagQARequest) -> RagQAResponse:
 
 
 @router.post("/generate/figma", response_model=RagQAResponse)
-async def rag_generate_from_figma(body: RagQARequest) -> RagQAResponse:
+async def rag_generate_from_figma(
+    body: RagQARequest, db: Session = Depends(get_vector_db)
+) -> RagQAResponse:
     """
     Figma 화면 정보를 기반으로 QA 테스트케이스 JSON을 생성하는 엔드포인트. (Postgres 버전)
     """
     settings = get_app_settings()
+    config = get_app_config(db)
+    if not config:
+        raise HTTPException(
+            status_code=404,
+            detail="DB에 시스템 설정(Configurations)이 존재하지 않습니다.",
+        )
+
     logger.info("[RAG-Figma-PG] Figma RAG 요청 수신")
 
     if not figma_rag_vector_store_pg.enabled:
@@ -258,10 +284,15 @@ async def rag_generate_from_figma(body: RagQARequest) -> RagQAResponse:
             status_code=503, detail="Figma RAG 기능이 비활성화되어 있습니다."
         )
 
-    # 1) 검색용 쿼리는 .env에서 가져오기 (요청 바디의 query는 무시)
+    # 1) 검색용 쿼리는 .env에서 가져오기
     search_query = settings.RAG_DEFAULT_QUERY
     search_top_k = settings.RAG_TOP_K
-    rag_batch_size = settings.RAG_BATCH_SIZE
+
+    # DB 설정 적용
+    rag_batch_size = config.rag_batch_size
+    n = config.rag_tc_count
+    id_prefix = config.rag_tc_id_prefix
+    llm_model = config.llm_model
 
     # DB에서 현재 소스에 해당하는 총 아이템 수 확인
     total_items = figma_rag_vector_store_pg.get_count()
@@ -307,9 +338,8 @@ async def rag_generate_from_figma(body: RagQARequest) -> RagQAResponse:
     )
 
     # 3) 테스트케이스 개수 / ID prefix
-    n = settings.RAG_TC_COUNT
-    id_prefix = settings.RAG_TC_ID_PREFIX
-    model_name = body.model or settings.LLM_MODEL
+    # n, id_prefix는 위에서 DB 설정으로 이미 가져옴
+    model_name = body.model or llm_model
     logger.info(
         "[RAG-Figma-PG] 요청 n=%d, ID prefix=%s, model=%s",
         n,
@@ -419,6 +449,150 @@ async def rag_generate_from_figma(body: RagQARequest) -> RagQAResponse:
     logger.info(
         "[RAG-Figma-PG] 최종 완료 - 총 %d개 테스트케이스 반환", len(all_testcases)
     )
+    return RagQAResponse(
+        answer=json.dumps(all_testcases, ensure_ascii=False),
+        contexts=contexts,
+    )
+
+
+@router.post("/generate/all", response_model=RagQAResponse)
+async def rag_generate_all(
+    body: RagQARequest, db: Session = Depends(get_vector_db)
+) -> RagQAResponse:
+    """
+    [통합 RAG] 파일과 피그마 데이터를 모두 통합하여 검색하고,
+    QA 테스트케이스를 생성하며 실시간 진행상황을 DB(History)에 기록합니다.
+    """
+    settings = get_app_settings()
+    config = get_app_config(db)
+    if not config:
+        raise HTTPException(
+            status_code=404,
+            detail="DB에 시스템 설정(Configurations)이 존재하지 않습니다.",
+        )
+
+    # 1) 공통 설정 로드
+    search_query = settings.RAG_DEFAULT_QUERY
+    search_top_k = settings.RAG_TOP_K
+    rag_batch_size = config.rag_batch_size
+    n = config.rag_tc_count
+    id_prefix = config.rag_tc_id_prefix
+    llm_model = body.model or config.llm_model or "llama3.1:8b"
+
+    # DB에서 전체 소스(file + figma)에 해당하는 총 아이템 수 확인
+    total_items = db.query(RagEmbedding).count()
+    if total_items == 0:
+        logger.warning("[RAG-All-PG] DB에 데이터가 없음")
+        raise HTTPException(status_code=404, detail="DB에 저장된 데이터가 없습니다.")
+
+    # top_k: 0 이하 → 전체 사용, 아니면 상위 N개
+    if search_top_k and search_top_k > 0:
+        top_k = min(search_top_k, total_items)
+    else:
+        top_k = total_items  # 전체 사용
+
+    logger.info(
+        "[RAG-All-PG] 전체 컨텍스트 수=%d, 설정 top_k=%s → 실제 사용 top_k=%d",
+        total_items,
+        search_top_k,
+        top_k,
+    )
+
+    # 2) 통합 벡터 검색 (File + Figma)
+    query_vec = embedding_service.embed_query(search_query)[0].tolist()
+    results = search_all_sources(db, query_vec, top_k=top_k)
+
+    if not results:
+        raise HTTPException(status_code=404, detail="관련 내용을 찾지 못했습니다.")
+
+    contexts = [{"text": r.text, "meta": r.metadata_json} for r in results]
+    num_batches = (len(contexts) + rag_batch_size - 1) // rag_batch_size
+
+    # 3) 실행 이력 DB 생성 (Status: Running)
+    db_history = create_history(
+        db,
+        title=f"통합 생성: {search_query[:20]}...",
+        source_type="all",
+        total_batches=num_batches,
+        model_name=llm_model,
+    )
+
+    all_testcases = []
+    global_index = 1
+
+    try:
+        async with httpx.AsyncClient(
+            base_url=settings.OLLAMA_BASE_URL,
+            timeout=settings.OLLAMA_TIMEOUT,
+        ) as client:
+            for batch_idx, i in enumerate(
+                range(0, len(contexts), rag_batch_size), start=1
+            ):
+                batch = contexts[i : i + rag_batch_size]
+
+                # 실시간 프로그레스 업데이트
+                update_progress(
+                    db,
+                    db_history.id,
+                    batch_idx,
+                    log_msg=f"Batch {batch_idx}/{num_batches} 생성 중...",
+                )
+
+                # 컨텍스트 구성
+                context_text = "\n\n".join(
+                    [f"[{idx + 1}] {c['text']}" for idx, c in enumerate(batch)]
+                )
+
+                # [통합용 프롬프트] 파일의 명세 정보와 피그마의 UI 정보를 모두 고려하도록 설계
+                prompt = (
+                    f"당신은 숙련된 QA 엔지니어입니다. 제공된 [CONTEXT]는 시스템의 문서 명세와 Figma 화면 설계 정보가 통합된 데이터입니다.\n"
+                    f"두 정보를 결합하여 실질적이고 구체적인 테스트케이스를 작성하세요.\n\n"
+                    f"## 작업 규칙\n"
+                    f"1. **문서 + 화면 통합 분석**: 문서의 비즈니스 로직과 Figma의 UI 요소(버튼, 입력 필드 등)를 매칭하여 '사용자 흐름' 중심의 테스크케이스를 만드세요.\n"
+                    f"2. **구체적 절차**: steps는 사용자가 무엇을 클릭하고 무엇을 입력해야 하는지 명확하게 기술하세요.\n"
+                    f"3. **ID Prefix**: 모든 결과는 {id_prefix} 접두어를 사용해야 합니다.\n"
+                    f"4. **제한**: 최대 {n}개까지만 생성하세요.\n"
+                    f"5. **출력 형식**: 오직 아래 스키마를 따르는 JSON 배열만 출력하세요. 설명이나 마크다운은 생략하세요.\n\n"
+                    f"## JSON 스키마\n"
+                    f"  {{\n"
+                    f'    "testcase_id": "{id_prefix}_001",\n'
+                    f'    "module": "모듈명",\n'
+                    f'    "title": "테스트 제목",\n'
+                    f'    "preconditions": "사전 조건",\n'
+                    f'    "steps": ["Step 1...", "Step 2..."],\n'
+                    f'    "expected_result": "예상 결과",\n'
+                    f'    "priority": "High|Medium|Low"\n'
+                    f"  }}\n\n"
+                    f"### CONTEXT:\n{context_text}\n"
+                )
+
+                # LLM 호출
+                resp = await client.post(
+                    "/api/generate",
+                    json={"model": llm_model, "prompt": prompt, "stream": False},
+                )
+                if resp.status_code == 200:
+                    raw_content = resp.json().get("response", "")
+                    batch_cases = json.loads(extract_json_array(raw_content))
+                    for tc in batch_cases:
+                        tc["testcase_id"] = f"{id_prefix}_{global_index:03d}"
+                        global_index += 1
+                        all_testcases.append(tc)
+
+        # 4) 성공 처리
+        complete_history(
+            db,
+            db_history.id,
+            status="success",
+            summary=f"통합 테스트케이스 {len(all_testcases)}개 생성 완료",
+            result_data=all_testcases,
+        )
+
+    except Exception as e:
+        logger.exception("통합 RAG 생성 실패")
+        complete_history(db, db_history.id, status="failed", summary=f"오류: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
     return RagQAResponse(
         answer=json.dumps(all_testcases, ensure_ascii=False),
         contexts=contexts,

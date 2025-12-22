@@ -15,7 +15,9 @@ from app.api.v1.endpoints import ollama as ollama_router
 from app.api.v1.endpoints import rag as rag_router
 from app.api.v1.endpoints import mcp as mcp_router
 from app.api.v1.endpoints import figma as figma_router
-from app.api.v1.endpoints import rag_faiss as rag_faiss_router
+from app.api.v1.endpoints import config as config_router
+from app.api.v1.endpoints import history as history_router
+# from app.api.v1.endpoints import rag_faiss as rag_faiss_router
 
 # RAG 벡터 스토어 임포트
 # FAISS 버전
@@ -40,7 +42,8 @@ async def lifespan(app: FastAPI):
     logger.info("=" * 60)
     logger.info("LLM RAG API 서버 시작")
     logger.info("=" * 60)
-    # 서버 시작 시 한 번 실행할 초기화 로직
+
+    # 1. 벡터 스토어 초기화
     # await file_rag_vector_store.ensure_vector_store()
     # await figma_rag_vector_store.ensure_vector_store()
     await file_rag_vector_store_pg.ensure_vector_store()
@@ -85,7 +88,9 @@ app.include_router(ollama_router.router, prefix="/api/v1")
 app.include_router(rag_router.router, prefix="/api/v1")
 app.include_router(mcp_router.router, prefix="/api/v1")
 app.include_router(figma_router.router, prefix="/api/v1")
-app.include_router(rag_faiss_router.router, prefix="/api/v1")
+app.include_router(config_router.router, prefix="/api/v1/config")
+app.include_router(history_router.router, prefix="/api/v1")
+# app.include_router(rag_faiss_router.router, prefix="/api/v1")
 
 # (옵션) 이 파일을 직접 실행할 때만 uvicorn으로 기동
 if __name__ == "__main__":

@@ -21,7 +21,25 @@ class FigmaClient:
     def __init__(self):
         self.settings = get_settings()
         self.base_url = "https://api.figma.com/v1"
-        self.headers = {"X-Figma-Token": self.settings.FIGMA_API_TOKEN}
+
+    def _get_token(self) -> str:
+        """DB에서 최신 Figma API 토큰을 가져옵니다."""
+        from app.db.database import VectorSessionLocal
+        from app.crud.config import get_app_config
+
+        try:
+            with VectorSessionLocal() as db:
+                config = get_app_config(db)
+                if config and config.figma_api_token:
+                    return config.figma_api_token
+        except Exception as e:
+            logger.error(f"DB에서 Figma 토큰을 가져오는데 실패했습니다: {e}")
+        return ""
+
+    @property
+    def headers(self) -> dict:
+        """실시간 토큰을 포함한 헤더를 반환합니다."""
+        return {"X-Figma-Token": self._get_token()}
 
     async def get_project_files(
         self, project_id: str, branch_data: bool = False

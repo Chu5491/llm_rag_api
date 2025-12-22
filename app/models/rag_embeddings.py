@@ -1,4 +1,4 @@
-# app/models/vector_models.py
+# app/models/rag_embeddings.py
 from sqlalchemy import Column, Integer, Text, JSON, DateTime, String
 from pgvector.sqlalchemy import Vector
 from app.db.database import VectorBase

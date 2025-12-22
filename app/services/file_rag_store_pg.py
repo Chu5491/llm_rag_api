@@ -7,7 +7,11 @@ from app.core.config import get_settings
 from app.services.embeddings import embedding_service
 from app.core.logging import get_logger
 from app.db.database import VectorSessionLocal
-from app.models.vector_models import RagEmbedding
+from app.crud.rag import (
+    get_rag_count_by_source,
+    create_rag_embeddings,
+    search_similar_embeddings,
+)
 
 logger = get_logger(__name__)
 
@@ -29,11 +33,7 @@ class FileRagVectorStorePG:
     def get_count(self) -> int:
         """현재 DB에 저장된 파일 소스의 총 청크 수를 반환한다."""
         with VectorSessionLocal() as db:
-            return (
-                db.query(RagEmbedding)
-                .filter(RagEmbedding.source_type == self.source_type)
-                .count()
-            )
+            return get_rag_count_by_source(db, self.source_type)
 
     async def ensure_vector_store(self):
         """
@@ -42,11 +42,7 @@ class FileRagVectorStorePG:
         """
         with VectorSessionLocal() as db:
             # 해당 소스 타입(file)의 데이터가 있는지 확인
-            count = (
-                db.query(RagEmbedding)
-                .filter(RagEmbedding.source_type == self.source_type)
-                .count()
-            )
+            count = get_rag_count_by_source(db, self.source_type)
             if count == 0:
                 logger.info(
                     f"DB에 '{self.source_type}' 데이터가 없으므로 '{self.settings.UPLOADS_DIR}' 폴더에서 초기 빌드를 시작합니다."
@@ -123,16 +119,19 @@ class FileRagVectorStorePG:
         embeddings = embedding_service.embed_texts(texts)
 
         # DB 세션을 열어 각 청크와 벡터를 저장
+        embeddings_data = []
+        for entry, emb in zip(all_entries, embeddings):
+            embeddings_data.append(
+                {
+                    "source_type": self.source_type,
+                    "text": entry["text"],
+                    "embedding": emb.tolist(),
+                    "metadata_json": entry["meta"],
+                }
+            )
+
         with VectorSessionLocal() as db:
-            for entry, emb in zip(all_entries, embeddings):
-                new_emb = RagEmbedding(
-                    source_type=self.source_type,
-                    text=entry["text"],
-                    embedding=emb.tolist(),
-                    metadata_json=entry["meta"],
-                )
-                db.add(new_emb)
-            db.commit()
+            create_rag_embeddings(db, embeddings_data)
         logger.info("✅ DB 저장 완료")
 
     def search(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
@@ -144,15 +143,7 @@ class FileRagVectorStorePG:
         query_vec = embedding_service.embed_query(query)[0].tolist()
 
         with VectorSessionLocal() as db:
-            # 코사인 거리(cosine_distance)를 기준으로 정렬하여 가장 가까운 문서 조회
-            # (<=> operator in pgvector)
-            results = (
-                db.query(RagEmbedding)
-                .filter(RagEmbedding.source_type == self.source_type)
-                .order_by(RagEmbedding.embedding.cosine_distance(query_vec))
-                .limit(top_k)
-                .all()
-            )
+            results = search_similar_embeddings(db, query_vec, self.source_type, top_k)
 
             output = []
             for res in results:
