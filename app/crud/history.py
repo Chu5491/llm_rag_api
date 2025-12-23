@@ -1,7 +1,10 @@
 from sqlalchemy.orm import Session
 from app.models.history import GenerateHistory
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, List
+
+# KST 타임존 설정 (UTC+9)
+KST = timezone(timedelta(hours=9))
 
 
 def create_history(
@@ -16,7 +19,7 @@ def create_history(
         progress=0,
         model_name=model_name,
         status="running",
-        logs=f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] 작업 시작\n",
+        logs=f"[{datetime.now(KST).strftime('%H:%M:%S')}] 작업 시작\n",
     )
     db.add(db_history)
     db.commit()
@@ -35,7 +38,7 @@ def update_progress(
             history.progress = int((current_batch / history.total_batches) * 100)
 
         if log_msg:
-            timestamp = datetime.now(timezone.utc).strftime("%H:%M:%S")
+            timestamp = datetime.now(KST).strftime("%H:%M:%S")
             history.logs = (history.logs or "") + f"[{timestamp}] {log_msg}\n"
 
         db.commit()
@@ -57,7 +60,7 @@ def complete_history(
         if status == "success":
             history.progress = 100
 
-        timestamp = datetime.now(timezone.utc).strftime("%H:%M:%S")
+        timestamp = datetime.now(KST).strftime("%H:%M:%S")
         history.logs = (history.logs or "") + f"[{timestamp}] 작업 {status}\n"
 
         db.commit()

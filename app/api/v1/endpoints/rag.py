@@ -1,6 +1,7 @@
 # app/api/v1/endpoints/rag.py
-from typing import List
+from typing import List, Dict
 import json
+import asyncio
 
 # FastAPI 라우터
 from fastapi import APIRouter, HTTPException, Depends
@@ -8,7 +9,12 @@ from sqlalchemy.orm import Session
 from app.db.database import get_vector_db
 from app.crud.config import get_app_config
 from app.crud.rag import search_all_sources
-from app.crud.history import create_history, update_progress, complete_history
+from app.crud.history import (
+    create_history,
+    update_progress,
+    complete_history,
+    get_history_by_id,
+)
 
 # 방금 만든 EmbeddingService 사용
 from app.services.embeddings import embedding_service
@@ -33,8 +39,20 @@ from app.utils.rag_parser import extract_json_array
 
 
 logger = get_logger(__name__)
+
+
 # /api/v1/rag 아래로 묶이는 라우터
 router = APIRouter(prefix="/rag", tags=["rag"])
+
+
+# Global dictionary to track active tasks
+_active_tasks: Dict[int, asyncio.Task] = {}
+
+
+def get_active_tasks() -> Dict[int, asyncio.Task]:
+    """Get the global _active_tasks dictionary"""
+    global _active_tasks
+    return _active_tasks
 
 
 @router.get("/embed-debug", response_model=EmbedDebugResponse)
@@ -476,8 +494,9 @@ async def rag_generate_all(
     search_top_k = settings.RAG_TOP_K
     rag_batch_size = config.rag_batch_size
     n = config.rag_tc_count
-    id_prefix = config.rag_tc_id_prefix
+    id_prefix = body.tcPrefix or config.rag_tc_id_prefix
     llm_model = body.model or config.llm_model or "llama3.1:8b"
+    language = body.language or "한글"
 
     # DB에서 전체 소스(file + figma)에 해당하는 총 아이템 수 확인
     total_items = db.query(RagEmbedding).count()
@@ -511,7 +530,7 @@ async def rag_generate_all(
     # 3) 실행 이력 DB 생성 (Status: Running)
     db_history = create_history(
         db,
-        title=f"통합 생성: {search_query[:20]}...",
+        title=f"{body.title}",
         source_type="all",
         total_batches=num_batches,
         model_name=llm_model,
@@ -519,6 +538,10 @@ async def rag_generate_all(
 
     all_testcases = []
     global_index = 1
+
+    # Register current task for cancellation
+    current_task = asyncio.current_task()
+    _active_tasks[db_history.id] = current_task
 
     try:
         async with httpx.AsyncClient(
@@ -545,25 +568,18 @@ async def rag_generate_all(
 
                 # [통합용 프롬프트] 파일의 명세 정보와 피그마의 UI 정보를 모두 고려하도록 설계
                 prompt = (
-                    f"당신은 숙련된 QA 엔지니어입니다. 제공된 [CONTEXT]는 시스템의 문서 명세와 Figma 화면 설계 정보가 통합된 데이터입니다.\n"
-                    f"두 정보를 결합하여 실질적이고 구체적인 테스트케이스를 작성하세요.\n\n"
-                    f"## 작업 규칙\n"
-                    f"1. **문서 + 화면 통합 분석**: 문서의 비즈니스 로직과 Figma의 UI 요소(버튼, 입력 필드 등)를 매칭하여 '사용자 흐름' 중심의 테스크케이스를 만드세요.\n"
-                    f"2. **구체적 절차**: steps는 사용자가 무엇을 클릭하고 무엇을 입력해야 하는지 명확하게 기술하세요.\n"
-                    f"3. **ID Prefix**: 모든 결과는 {id_prefix} 접두어를 사용해야 합니다.\n"
-                    f"4. **제한**: 최대 {n}개까지만 생성하세요.\n"
-                    f"5. **출력 형식**: 오직 아래 스키마를 따르는 JSON 배열만 출력하세요. 설명이나 마크다운은 생략하세요.\n\n"
-                    f"## JSON 스키마\n"
-                    f"  {{\n"
-                    f'    "testcase_id": "{id_prefix}_001",\n'
-                    f'    "module": "모듈명",\n'
-                    f'    "title": "테스트 제목",\n'
-                    f'    "preconditions": "사전 조건",\n'
-                    f'    "steps": ["Step 1...", "Step 2..."],\n'
-                    f'    "expected_result": "예상 결과",\n'
-                    f'    "priority": "High|Medium|Low"\n'
-                    f"  }}\n\n"
-                    f"### CONTEXT:\n{context_text}\n"
+                    f"역할: 숙련된 QA 엔지니어\n"
+                    f"작업: [CONTEXT](문서+Figma)를 분석해 '사용자 흐름' 중심 테스트케이스 작성\n"
+                    f"출력: 오직 JSON 배열만 반환 (설명/마크다운 제거)\n\n"
+                    f"규칙:\n"
+                    f"1. 언어: 반드시 {language}로 작성\n"
+                    f"2. ID: '{id_prefix}_###' 형식 (001부터 순차 증가)\n"
+                    f"3. Steps: [행동] 클릭/입력/선택 및 [확인] UI 변화를 구체적으로 기술\n"
+                    f"4. 정합성: 문서 로직과 Figma UI 요소를 매핑. 추측 금지\n"
+                    f"5. 수량: 유의미한 케이스로 최대 {n}개 (중복 없이 {n}개에 가깝게 생성)\n\n"
+                    f"스키마:\n"
+                    f'[{{"testcase_id":"ID","module":"화면명","title":"제목","preconditions":"사전조건","steps":["1...","2..."],"expected_result":"결과","priority":"High|Medium|Low"}}]\n\n'
+                    f"CONTEXT:\n{context_text}"
                 )
 
                 # LLM 호출
@@ -572,12 +588,35 @@ async def rag_generate_all(
                     json={"model": llm_model, "prompt": prompt, "stream": False},
                 )
                 if resp.status_code == 200:
-                    raw_content = resp.json().get("response", "")
-                    batch_cases = json.loads(extract_json_array(raw_content))
-                    for tc in batch_cases:
-                        tc["testcase_id"] = f"{id_prefix}_{global_index:03d}"
-                        global_index += 1
-                        all_testcases.append(tc)
+                    data = resp.json()
+                    raw_content = (data.get("response") or "").strip()
+
+                    try:
+                        # Extract JSON array from the response
+                        json_str = extract_json_array(raw_content)
+                        batch_cases = (
+                            json.loads(json_str)
+                            if isinstance(json_str, str)
+                            else json_str
+                        )
+
+                        if not isinstance(batch_cases, list):
+                            batch_cases = [batch_cases]
+
+                        for tc in batch_cases:
+                            if not isinstance(tc, dict):
+                                logger.warning(
+                                    "Skipping non-dict test case: %s", str(tc)[:200]
+                                )
+                                continue
+
+                            tc["testcase_id"] = f"{id_prefix}_{global_index:03d}"
+                            global_index += 1
+                            all_testcases.append(tc)
+
+                    except Exception as e:
+                        logger.exception("Failed to parse test cases: %s", str(e))
+                        raise
 
         # 4) 성공 처리
         complete_history(
@@ -588,12 +627,53 @@ async def rag_generate_all(
             result_data=all_testcases,
         )
 
+    except asyncio.CancelledError:
+        logger.info(f"[RAG-All-PG] Task {db_history.id} cancelled by user")
+        # History status update is handled in cancel_generation endpoint
+        raise
     except Exception as e:
         logger.exception("통합 RAG 생성 실패")
         complete_history(db, db_history.id, status="failed", summary=f"오류: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        # Remove from active tasks
+        _active_tasks.pop(db_history.id, None)
 
     return RagQAResponse(
         answer=json.dumps(all_testcases, ensure_ascii=False),
         contexts=contexts,
     )
+
+
+@router.post("/cancel/{history_id}")
+async def cancel_generation(history_id: int, db: Session = Depends(get_vector_db)):
+    """
+    실행 중인 RAG 생성 작업을 취소합니다.
+    """
+    # DB에서 히스토리 확인
+    history = get_history_by_id(db, history_id)
+    if not history:
+        raise HTTPException(status_code=404, detail="해당 이력을 찾을 수 없습니다.")
+
+    # 이미 완료된 작업인지 확인
+    if history.status in ["success", "failed", "cancelled"]:
+        return {
+            "status": "already_completed",
+            "detail": "이미 완료되거나 취소된 작업입니다.",
+        }
+
+    # 활성 작업에서 찾아서 취소
+    task = get_active_tasks().get(history_id)
+    if task and not task.done():
+        task.cancel()
+        try:
+            await task  # 취소 완료 대기
+        except asyncio.CancelledError:
+            pass
+
+    # DB 상태 업데이트
+    complete_history(
+        db, history_id, status="cancelled", summary="사용자 요청에 의해 취소됨"
+    )
+
+    return {"status": "cancelled", "detail": "작업이 성공적으로 취소되었습니다."}

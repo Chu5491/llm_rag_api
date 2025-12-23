@@ -6,6 +6,9 @@ from starlette import status
 
 # 설정 의존성 임포트
 from app.api.deps import get_app_settings
+from sqlalchemy.orm import Session
+from app.db.database import get_vector_db
+from app.crud.config import get_app_config
 
 # 설정 타입 임포트
 from app.core.config import Settings
@@ -74,9 +77,20 @@ async def get_ollama_models(settings: Settings = Depends(get_app_settings)):
 async def chat_with_ollama(
     body: OllamaChatRequest,
     settings: Settings = Depends(get_app_settings),
+    db: Session = Depends(get_vector_db),
 ):
     # 클라이언트 생성
     client = OllamaClient(settings)
+
+    # DB에서 최신 설정 가져오기
+    config = get_app_config(db)
+    # 바디에 모델이 있으면 사용하고, 없으면 DB 설정을 우선 사용 (DB 설정도 없으면 바디의 기본값 등 활용)
+    target_model = body.model
+    if config and config.llm_model:
+        target_model = config.llm_model
+        logger.info(f"[Ollama-Chat] DB 설정 모델 사용: {target_model}")
+    else:
+        logger.info(f"[Ollama-Chat] 요청 바디 모델 사용: {target_model}")
 
     try:
         # chat 호출
@@ -84,7 +98,7 @@ async def chat_with_ollama(
         messages_dict = [msg.model_dump() for msg in body.messages]
         data = await client.chat_with_messages(
             messages=messages_dict,
-            model=body.model,
+            model=target_model,
             stream=body.stream,
             options=body.options,
         )
