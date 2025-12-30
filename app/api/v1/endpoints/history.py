@@ -28,3 +28,36 @@ def history_detail(history_id: int, db: Session = Depends(get_vector_db)):
     if history is None:
         raise HTTPException(status_code=404, detail="해당 이력을 찾을 수 없습니다.")
     return history
+
+@router.post("/cancel/{history_id}")
+async def cancel_generation(history_id: int, db: Session = Depends(get_vector_db)):
+    """
+    실행 중인 RAG 생성 작업을 취소합니다.
+    """
+    # DB에서 히스토리 확인
+    history = get_history_by_id(db, history_id)
+    if not history:
+        raise HTTPException(status_code=404, detail="해당 이력을 찾을 수 없습니다.")
+
+    # 이미 완료된 작업인지 확인
+    if history.status in ["success", "failed", "cancelled"]:
+        return {
+            "status": "already_completed",
+            "detail": "이미 완료되거나 취소된 작업입니다.",
+        }
+
+    # 활성 작업에서 찾아서 취소
+    task = get_active_tasks().get(history_id)
+    if task and not task.done():
+        task.cancel()
+        try:
+            await task  # 취소 완료 대기
+        except asyncio.CancelledError:
+            pass
+
+    # DB 상태 업데이트
+    complete_history(
+        db, history_id, status="cancelled", summary="사용자 요청에 의해 취소됨"
+    )
+
+    return {"status": "cancelled", "detail": "작업이 성공적으로 취소되었습니다."}
